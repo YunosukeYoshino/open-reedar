@@ -1,6 +1,6 @@
 # Roadmap
 
-Current development baseline: **0.1.3 (unreleased)**, September 12, 2026. Reedar runs locally on macOS with verified Codex reading and locally built Apple Silicon previews. The first public prerelease is [v0.1.2](https://github.com/YunosukeYoshino/open-reedar/releases/tag/v0.1.2).
+Current development baseline: **0.2.2 (unreleased)**, September 29, 2026. Reedar runs locally on macOS with verified Codex reading and locally built Apple Silicon previews. The latest public prerelease is [v0.2.1](https://github.com/YunosukeYoshino/open-reedar/releases/tag/v0.2.1), published automatically from a `v*` tag.
 
 Checked items are implemented and validated within the scope stated. Unchecked items are proposed work, not release-date commitments. The sections below have separate completion criteria: daily-reader improvements and additional providers do not all need to ship before a first public preview.
 
@@ -8,7 +8,7 @@ Checked items are implemented and validated within the scope stated. Unchecked i
 
 Automatic PR checks are configured. Complete **a fresh installation on another Apple Silicon Mac** to extend validation beyond the development machine. The license and preview limitations are documented in the public repository and prerelease. Other reader features can follow a clearly labeled early preview.
 
-Subscription removal/restoration and OPML import/export are now implemented. Folder cleanup can follow. Automatic refresh is the next convenience improvement; service sync and more providers can wait. Desktop update checking is implemented; automatic installation awaits signed release validation.
+Subscription removal/restoration, folder removal, and OPML import/export are now implemented. Automatic refresh is the next convenience improvement; service sync and more providers can wait. Desktop update checking is implemented; automatic installation awaits signed release validation.
 
 The detailed checkboxes below remain the source of status for these priorities.
 
@@ -19,11 +19,14 @@ The detailed checkboxes below remain the source of status for these priorities.
 - [x] Local library and conversation persistence across normal app restarts.
 - [x] Linked-page article extraction before AI requests, with an explicit feed-text fallback.
 - [x] Streamed summaries in the main reader, a return-to-feed control, and inspection of the supplied source text.
-- [x] Codex / GPT-5.3-Codex-Spark summaries and follow-up conversations using an existing CLI login.
+- [x] Codex / GPT-6 Luna summaries and follow-up conversations using an existing CLI login.
 - [x] Explicit execution states, cancellation, source snapshots, and restricted reading sessions.
+- [x] In-app reader mode for linked articles, with a next-article cue at the end of each article.
+- [x] English-first UI with a Japanese language switch in agent connection settings.
+- [x] An `open-reedar` CLI (feeds / articles / article text / summarize) plus a one-click installer that drops an agent skill into Claude, Codex, and generic skill directories.
 - [x] App icon, local Apple Silicon DMG / ZIP packaging, and checksums; ad-hoc signing only.
 - [x] English project and contribution documentation, issue / PR templates, and a manual packaging workflow definition.
-- [x] Local automated checks: 66 tests / 216 assertions, type checking, and desktop / renderer builds.
+- [x] Local automated checks: 88 tests, type checking, and desktop / renderer builds.
 
 Evidence and provider-specific limits: [Validation](docs/validation.md).
 
@@ -46,7 +49,7 @@ See [Distribution](docs/distribution.md) for the build procedure and [v0.1.2](ht
 Prioritize moving an existing feed library into Reedar and managing it without editing local JSON.
 
 - [x] **Remove and restore subscriptions.** Removed feeds stop refreshing and disappear from reading views; cached articles, stars, and conversations are retained for restoration.
-- [ ] **Remove folders.** Define where their subscriptions move, with an undo or recovery flow.
+- [x] **Remove folders.** Deleting a folder unassigns its feeds; subscriptions stay readable.
 - [x] **Import and export OPML.** Preserve folder membership, skip duplicates, report individual failures, and support cancellation. Nested folder paths are flattened; the import limit is 256 KB / 200 feeds.
 - [ ] **Refresh feeds automatically while the app is open.** Add a configurable interval, retry/backoff, and conditional requests so repeated refreshes do not download unchanged feeds unnecessarily.
 - [ ] **Mark a feed or folder as read.** Add scoped bulk actions with a clear target and undo.
@@ -74,7 +77,7 @@ Provider work can progress independently. Neither Claude verification nor Antigr
 
 ## Later candidates — not required for the first release
 
-- [ ] English UI and selectable summary language.
+- [x] English UI and selectable summary language. English is the default; Japanese is selectable in settings, and AI prompts follow the UI language.
 - [ ] Reading preferences such as font size and appearance, plus saved agent preferences.
 - [ ] Dedicated translation, highlighting, notes, and conversation export.
 - [ ] Multi-article comparisons and explicitly enabled digests.
@@ -82,4 +85,4 @@ Provider work can progress independently. Neither Claude verification nor Antigr
 
 ## Keeping this checklist useful
 
-For implementation work, create a focused issue with acceptance criteria, link its PR here, and check the item only after the relevant tests and manual verification pass. Keep [Validation](docs/validation.md) aligned with claims of live provider and release support. No issue or PR links are present yet because this checkout has no configured remote.
+For implementation work, create a focused issue with acceptance criteria, link its PR here, and check the item only after the relevant tests and manual verification pass. Keep [Validation](docs/validation.md) aligned with claims of live provider and release support.

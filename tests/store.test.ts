@@ -36,8 +36,11 @@ describe("reader persistence", () => {
   test("refresh drops reader content when the article URL changes", async () => {
     const store = await Store.open(join(directory, "url-change.json"));
     store.mergeFeed(feed, [{ ...article, readerHtml: "<p>Old</p>", readerText: "Old" }]);
-    store.mergeFeed(feed, [{ ...article, url: "https://example.com/article-v2" }]);
-    expect(store.article("article")).toMatchObject({ url: "https://example.com/article-v2", readerHtml: undefined, readerText: undefined });
+    store.mergeFeed(feed, [{ ...article, url: "https://example.com/article-v2", readerHtml: undefined, readerText: undefined }]);
+    const updated = store.article("article");
+    expect(updated.url).toBe("https://example.com/article-v2");
+    expect(updated.readerHtml).toBeUndefined();
+    expect(updated.readerText).toBeUndefined();
   });
 
   test("a restart marks unfinished output as interrupted and preserves partial output", async () => {
