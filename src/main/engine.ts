@@ -34,6 +34,7 @@ export class Engine {
   private refreshJob: Promise<void> | undefined;
   private markReadUndoIds: string[] = [];
   private feedDiscovery: { url: string; candidates: { url: string; title: string }[] } | null = null;
+  private feedDiscoveryToken = 0;
   private listeners = new Set<(update: Update) => void>();
   private jobs = new Map<string, { controller: AbortController; done: Promise<void> }>();
 
@@ -75,8 +76,10 @@ export class Engine {
   private t(key: MessageKey, params?: Record<string, string | number>) { return t(this.store.state.language, key, params); }
 
   private async discoverFeed(raw: string) {
+    const token = ++this.feedDiscoveryToken;
     const url = publicUrl(raw, this.store.state.language).href;
     const candidates = await this.dependencies.discoverFeeds(url, undefined, this.store.state.language);
+    if (token !== this.feedDiscoveryToken) return;
     this.feedDiscovery = { url, candidates };
     this.changed();
   }
@@ -109,11 +112,12 @@ export class Engine {
         if (existing) throw new Error(this.t("err.feedExists"));
         const result = await this.dependencies.fetchFeed(url, this.store.folder(action.folderId), undefined, this.store.state.language);
         this.store.mergeFeed({ ...result.feed, etag: result.etag, lastModified: result.lastModified }, result.articles);
+        this.feedDiscoveryToken++;
         this.feedDiscovery = null;
         break;
       }
       case "feed.discover": return this.discoverFeed(action.url);
-      case "feed.discoverClear": this.feedDiscovery = null; this.changed(); return;
+      case "feed.discoverClear": this.feedDiscoveryToken++; this.feedDiscovery = null; this.changed(); return;
       case "feed.remove":
       case "feed.restore": {
         const feed = this.store.state.feeds.find((item) => item.id === action.id);
