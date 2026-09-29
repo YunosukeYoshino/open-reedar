@@ -90,10 +90,14 @@ export function decodeBody(body: Buffer, contentType: string) {
 
 export type FeedCandidate = { url: string; title: string };
 
-const feedTypes = new Set(["application/rss+xml", "application/atom+xml", "application/feed+json", "application/rdf+xml", "application/xml", "text/xml"]);
+// JSON Feed is intentionally absent: parseFeed only understands XML.
+const feedTypes = new Set(["application/rss+xml", "application/atom+xml", "application/rdf+xml", "application/xml", "text/xml"]);
 
 export function feedLinks(html: string, base: string): FeedCandidate[] {
   const document = new DOMParser().parseFromString(html, "text/html");
+  let root = base;
+  const baseHref = document.querySelector("base[href]")?.getAttribute("href")?.trim();
+  if (baseHref) { try { root = new URL(baseHref, base).href; } catch { /* an invalid base keeps the page URL */ } }
   const seen = new Set<string>();
   const candidates: FeedCandidate[] = [];
   for (const link of document.querySelectorAll('link[rel~="alternate"]')) {
@@ -101,7 +105,7 @@ export function feedLinks(html: string, base: string): FeedCandidate[] {
     const href = link.getAttribute("href")?.trim();
     if (!href || !feedTypes.has(type)) continue;
     try {
-      const url = publicUrl(new URL(href, base).href).href;
+      const url = publicUrl(new URL(href, root).href).href;
       if (!seen.has(url)) { seen.add(url); candidates.push({ url, title: link.getAttribute("title")?.trim() ?? "" }); }
     } catch { /* private or invalid candidate */ }
   }

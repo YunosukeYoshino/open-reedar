@@ -64,6 +64,14 @@ describe("feed ingestion", () => {
     ]);
     expect(feedLinks("<html><body>none</body></html>", "https://example.com")).toEqual([]);
   });
+  test("resolves candidates against a base element and skips unparseable feed types", () => {
+    const html = `<!doctype html><html><head>
+      <base href="https://example.com/">
+      <link rel="alternate" type="application/rss+xml" href="feed.xml">
+      <link rel="alternate" type="application/feed+json" href="feed.json">
+    </head></html>`;
+    expect(feedLinks(html, "https://example.com/blog/")).toEqual([{ url: "https://example.com/feed.xml", title: "" }]);
+  });
 });
 
 describe("public network boundary", () => {
