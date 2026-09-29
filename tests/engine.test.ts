@@ -12,7 +12,7 @@ const directory = await mkdtemp(join(tmpdir(), "reedar-engine-test-"));
 afterAll(async () => { await Bun.spawn(["trash", directory]).exited; });
 const xml = `<rss version="2.0"><channel><title>Test</title><link>https://example.com</link><item><guid>article</guid><title>Article</title><link>https://example.com/a</link><description>Evidence in the article.</description></item></channel></rss>`;
 
-async function setup(name: string, run: typeof runReader, failRefresh = false, fetchArticleText = async (_url: string, _signal: AbortSignal) => ({ text: "Evidence in the article.", url: "https://example.com/a" }), organize: typeof runOrganizer = async () => {}) {
+async function setup(name: string, run: typeof runReader, failRefresh = false, fetchArticleText = async (_url: string, _signal: AbortSignal) => ({ text: "Evidence in the article.", html: "<p>Evidence in the article.</p>", url: "https://example.com/a" }), organize: typeof runOrganizer = async () => {}) {
   const path = join(directory, name, "state.json");
   const store = await Store.open(path);
   const result = await parseFeed(xml, "https://example.com/rss", null);
@@ -55,7 +55,7 @@ describe("reading workflow", () => {
     const { engine, store, article } = await setup("full-text", async (_agent, conversation, _question, _cwd, _signal, emit) => {
       inputs.push(conversation.source.text);
       emit({ type: "delta", text: "Summary" });
-    }, false, async () => { fetched++; return { text: source, url: "https://example.com/full-article" }; });
+    }, false, async () => { fetched++; return { text: source, html: `<p>${source}</p>`, url: "https://example.com/full-article" }; });
     await engine.dispatch({ type: "chat.send", articleId: article.id, agent: "codex", text: "Summarize" });
     await engine.settle();
     await engine.dispatch({ type: "chat.send", articleId: article.id, agent: "codex", text: "Explain the final conclusion" });
@@ -64,6 +64,15 @@ describe("reading workflow", () => {
     expect(fetched).toBe(1);
     expect(article.text).toBe("Evidence in the article.");
     expect(store.state.conversations[0]?.source).toMatchObject({ text: source, origin: "web", url: "https://example.com/full-article" });
+    await engine.close();
+  });
+
+  test("article.fetchText stores the extracted page for reader view", async () => {
+    const { engine, article, path } = await setup("reader-view", async () => {}, false, async () => ({ text: "Full extracted article text.", html: "<p>Full extracted article text.</p>", url: "https://example.com/full" }));
+    await engine.dispatch({ type: "article.fetchText", id: article.id });
+    expect(article.readerHtml).toBe("<p>Full extracted article text.</p>");
+    expect(article.readerText).toBe("Full extracted article text.");
+    expect((await Store.open(path)).state.articles[0]?.readerHtml).toBe("<p>Full extracted article text.</p>");
     await engine.close();
   });
 
@@ -87,7 +96,7 @@ describe("reading workflow", () => {
     const { engine, store, article } = await setup("stop-fetch", async () => { runs++; }, false, async (_url, signal) => {
       started?.();
       await new Promise<void>((resolve) => { signal.addEventListener("abort", () => resolve(), { once: true }); });
-      return { text: "Late retrieved article", url: "https://example.com/a" };
+      return { text: "Late retrieved article", html: "<p>Late retrieved article</p>", url: "https://example.com/a" };
     });
     await engine.dispatch({ type: "chat.summarize", articleId: article.id, agent: "codex" });
     await ready;
@@ -103,7 +112,7 @@ describe("reading workflow", () => {
 
   test("upgrades legacy excerpt conversations while preserving their original source", async () => {
     let received = "";
-    const { engine, store, article, path } = await setup("legacy-source", async (_agent, conversation) => { received = conversation.source.text; }, false, async () => ({ text: "Complete linked article with its conclusion.", url: "https://example.com/a" }));
+    const { engine, store, article, path } = await setup("legacy-source", async (_agent, conversation) => { received = conversation.source.text; }, false, async () => ({ text: "Complete linked article with its conclusion.", html: "<p>Complete linked article with its conclusion.</p>", url: "https://example.com/a" }));
     store.state.conversations.push({ id: "legacy", articleId: article.id, agent: "codex", source: { title: article.title, url: article.url, text: article.text, capturedAt: article.receivedAt }, messages: [{ id: "old", role: "assistant", text: "Old excerpt answer", createdAt: article.receivedAt, state: { status: "completed" } }] });
     await engine.dispatch({ type: "chat.summarize", articleId: article.id, agent: "codex" });
     await engine.settle();
@@ -182,7 +191,7 @@ describe("reading workflow", () => {
     store.mergeFeed(parsed.feed, parsed.articles);
     const engine = new Engine(store, directory, {
       run: async () => {}, connect: async (agent) => ({ agent, installed: false, status: "unavailable", detail: "fixture" }),
-      fetchArticleText: async () => ({ text: "body", url: "https://example.com/a" }),
+      fetchArticleText: async () => ({ text: "body", html: "<p>body</p>", url: "https://example.com/a" }),
       fetchFeed: async () => { started?.(); await waiting; return { ...parsed, feed: { ...parsed.feed, title: "Refreshed" } }; },
     });
     const refreshing = engine.dispatch({ type: "refresh" });
@@ -247,7 +256,7 @@ describe("reading workflow", () => {
     const store = await Store.open(join(directory, "stop-opml.json"));
     const engine = new Engine(store, directory, {
       run: async () => {}, connect: async (agent) => ({ agent, installed: false, status: "unavailable", detail: "fixture" }),
-      fetchArticleText: async () => ({ text: "body", url: "https://example.com/a" }),
+      fetchArticleText: async () => ({ text: "body", html: "<p>body</p>", url: "https://example.com/a" }),
       fetchFeed: async (url, folderId, signal) => {
         started?.();
         await new Promise<void>((resolve) => { signal?.addEventListener("abort", () => resolve(), { once: true }); });

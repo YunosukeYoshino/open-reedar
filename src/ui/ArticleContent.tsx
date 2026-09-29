@@ -6,9 +6,9 @@ import { agentName } from "./format";
 import { useT } from "./i18n";
 import { MarkdownText } from "./MarkdownText";
 
-type Props = { article: Article; agent: Agent; conversation: Conversation | undefined; act: (action: Action) => Promise<void>; perform: (action: Action) => void };
+type Props = { article: Article; agent: Agent; conversation: Conversation | undefined; act: (action: Action) => Promise<void>; perform: (action: Action) => void; webView: boolean };
 
-export function ArticleContent({ article, agent, conversation, act, perform }: Props) {
+export function ArticleContent({ article, agent, conversation, act, perform, webView }: Props) {
   const t = useT();
   const [showSummary, setShowSummary] = useState(false);
   const [sending, setSending] = useState(false);
@@ -35,6 +35,6 @@ export function ArticleContent({ article, agent, conversation, act, perform }: P
         {conversation && (summary.state.status === "running" || summary.state.status === "waiting") ? <button className="text-button summary-stop" onClick={() => perform({ type: "chat.stop", conversationId: conversation.id })}><Square size={12} />{t("reader.stopSummary")}</button> : null}
         {summary.sourceOrigin && conversation ? <div className="summary-source"><p>{t("reader.usedChars", { origin: summary.sourceOrigin === "web" ? t("reader.sourceWeb") : t("reader.sourceFeed"), count: (summary.sourceOrigin === "feed" ? conversation.previousSource ?? conversation.source : conversation.source).text.length.toLocaleString() })}</p>{summary.sourceOrigin === "feed" ? <p className="run-notice">{t("reader.feedOnlyNote")}</p> : null}<details><summary>{t("reader.suppliedText", { count: (summary.sourceOrigin === "feed" ? conversation.previousSource ?? conversation.source : conversation.source).text.length.toLocaleString() })}</summary><div>{(summary.sourceOrigin === "feed" ? conversation.previousSource ?? conversation.source : conversation.source).text}</div></details></div> : null}
       </> : !error ? <p className="thinking" role="status">{t("reader.preparing")}</p> : null}
-    </section> : <><div className="article-html" dangerouslySetInnerHTML={{ __html: article.html }} />{!article.text ? <p className="muted">{t("reader.noBodyText")}</p> : null}</>}
+    </section> : <><div className="article-html" dangerouslySetInnerHTML={{ __html: webView && article.readerHtml ? article.readerHtml : article.html }} />{!article.text ? <p className="muted">{t("reader.noBodyText")}</p> : null}</>}
   </>;
 }
