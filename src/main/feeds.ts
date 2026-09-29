@@ -62,10 +62,12 @@ export async function parseFeed(xml: string, url: string, folderId: string | nul
   const feed: Feed = { id: feedId, url, title: plainText(parsed.title ?? "") || new URL(url).hostname, siteUrl: safeLink(parsed.link, url) || url, folderId, updatedAt: now, error: null };
   const articles: Article[] = parsed.items.map((item) => {
     const link = safeLink(item.link, url);
-    const title = plainText(item.title ?? "") || t(lang, "err.noTitle");
+    const text = plainText(item.title ?? "");
+    const title = text || t(lang, "err.noTitle");
     const body = cleanArticle(item["content:encoded"] || item.content || item.summary || "", link || url);
     const published = new Date(item.isoDate || item.pubDate || now);
-    const identity = item.guid || item.id || link || `${title}:${item.isoDate || item.pubDate || ""}`;
+    // The identity seed keeps the legacy untranslated fallback so article ids survive language changes and upgrades.
+    const identity = item.guid || item.id || link || `${text || "タイトルなし"}:${item.isoDate || item.pubDate || ""}`;
     return {
       id: hash(`${feedId}:${identity}`), feedId, title, url: link || feed.siteUrl,
       author: plainText(item.creator || item.author || ""),

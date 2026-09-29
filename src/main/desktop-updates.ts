@@ -104,12 +104,16 @@ export async function createDesktopUpdates(window: BrowserWindow, prepareToInsta
       const state = updates.state;
       if (item) {
         item.enabled = !updates.busy;
-        const lang = language();
-        item.label = state.kind === "checking" ? t(lang, "update.menuChecking") : state.kind === "downloading" ? t(lang, "update.menuDownloading", { percent: Math.floor(state.percent) }) : state.kind === "installing" ? t(lang, "update.menuInstalling") : state.kind === "ready" ? t(lang, "update.menuReady", { version: state.version }) : state.kind === "available" ? t(lang, "update.menuAvailable", { version: state.version }) : t(lang, "update.menuCheck");
+        item.label = menuLabel();
       }
       if (!window.isDestroyed()) window.setProgressBar(state.kind === "downloading" ? state.percent / 100 : -1);
     },
   });
-  const menuItem = (): MenuItemConstructorOptions => ({ id: "check-updates", label: t(language(), "update.menuCheck"), click: () => { void updates.check(true); } });
+  const menuLabel = () => {
+    const lang = language();
+    const state = updates.state;
+    return state.kind === "checking" ? t(lang, "update.menuChecking") : state.kind === "downloading" ? t(lang, "update.menuDownloading", { percent: Math.floor(state.percent) }) : state.kind === "installing" ? t(lang, "update.menuInstalling") : state.kind === "ready" ? t(lang, "update.menuReady", { version: state.version }) : state.kind === "available" ? t(lang, "update.menuAvailable", { version: state.version }) : t(lang, "update.menuCheck");
+  };
+  const menuItem = (): MenuItemConstructorOptions => ({ id: "check-updates", label: menuLabel(), enabled: !updates.busy, click: () => { void updates.check(true); } });
   return { menuItem, start: () => updates.start(), dispose: () => updates.dispose() };
 }

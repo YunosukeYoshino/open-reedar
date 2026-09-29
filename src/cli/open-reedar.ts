@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { agentSchema, stateSchema } from "../shared/schema";
 import { t } from "../shared/i18n";
-import type { Agent, Conversation, ReaderState } from "../shared/schema";
+import type { Agent, Conversation, Language, ReaderState } from "../shared/schema";
 import { agentError, runReader } from "../main/agents/reader";
 import type { AgentEvent } from "../main/agents/reader";
 
@@ -79,9 +79,9 @@ function articleRows(state: ReaderState, args: string[]) {
     }));
 }
 
-function findArticle(state: ReaderState, id: string) {
+function findArticle(state: ReaderState, id: string, lang: Language) {
   const article = state.articles.find((item) => item.id === id || item.id.startsWith(id));
-  if (!article) throw new Error(t("en", "err.articleMissing"));
+  if (!article) throw new Error(t(lang, "err.articleMissing"));
   return article;
 }
 
@@ -109,7 +109,7 @@ export async function cli(argv: string[], io: Io, run: typeof runReader = runRea
     const id = positional(args)[0];
     if (command === "article") {
       if (!id) { err("Usage: open-reedar article <id>"); return 1; }
-      const article = findArticle(state, id);
+      const article = findArticle(state, id, lang);
       const feed = state.feeds.find((feed) => feed.id === article.feedId);
       if (json) out(JSON.stringify(article, null, 2));
       else out(`${article.title}\n${feed?.title ?? ""} — ${article.publishedAt.slice(0, 10)} — ${article.url}\n${article.starred ? "★ " : ""}${article.read ? t(lang, "cli.read") : t(lang, "cli.unread")}\n\n${article.text}`);
@@ -119,7 +119,7 @@ export async function cli(argv: string[], io: Io, run: typeof runReader = runRea
       if (!id) { err("Usage: open-reedar summarize <id> [--agent codex|claude] [--question <text>]"); return 1; }
       const agent = (option(args, "agent") ?? "codex") as Agent;
       if (!agentSchema.options.includes(agent)) { err(t(lang, "err.unknownAgent", { agent })); return 1; }
-      const article = findArticle(state, id);
+      const article = findArticle(state, id, lang);
       const conversation: Conversation = {
         id: "cli", articleId: article.id, agent,
         source: { title: article.title, url: article.url, text: article.text || article.excerpt, capturedAt: article.receivedAt },

@@ -57,8 +57,13 @@ export class Engine {
     this.changed();
   }
 
+  private connectionProbe = 0;
+
   async refreshConnections() {
-    this.connections = await Promise.all(agentSchema.options.map((agent) => this.dependencies.connect(agent, this.runnerDirectory, this.store.state.language)));
+    const generation = ++this.connectionProbe;
+    const connections = await Promise.all(agentSchema.options.map((agent) => this.dependencies.connect(agent, this.runnerDirectory, this.store.state.language)));
+    if (generation !== this.connectionProbe) return;
+    this.connections = connections;
     this.changed();
   }
 
