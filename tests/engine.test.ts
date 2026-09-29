@@ -3,7 +3,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthenticationRequired } from "../src/main/agents/reader";
-import type { connection, runReader } from "../src/main/agents/reader";
+import type { connection, runOrganizer, runReader } from "../src/main/agents/reader";
 import { Engine } from "../src/main/engine";
 import { parseFeed } from "../src/main/feeds";
 import { Store } from "../src/main/store";
@@ -12,14 +12,14 @@ const directory = await mkdtemp(join(tmpdir(), "reedar-engine-test-"));
 afterAll(async () => { await Bun.spawn(["trash", directory]).exited; });
 const xml = `<rss version="2.0"><channel><title>Test</title><link>https://example.com</link><item><guid>article</guid><title>Article</title><link>https://example.com/a</link><description>Evidence in the article.</description></item></channel></rss>`;
 
-async function setup(name: string, run: typeof runReader, failRefresh = false, fetchArticleText = async (_url: string, _signal: AbortSignal) => ({ text: "Evidence in the article.", url: "https://example.com/a" })) {
+async function setup(name: string, run: typeof runReader, failRefresh = false, fetchArticleText = async (_url: string, _signal: AbortSignal) => ({ text: "Evidence in the article.", url: "https://example.com/a" }), organize: typeof runOrganizer = async () => {}) {
   const path = join(directory, name, "state.json");
   const store = await Store.open(path);
   const result = await parseFeed(xml, "https://example.com/rss", null);
   store.mergeFeed(result.feed, result.articles);
   const connect: typeof connection = async (agent) => ({ agent, installed: true, status: "ready", detail: "fixture" });
   const dependencies = {
-    run, connect, fetchArticleText,
+    run, connect, fetchArticleText, organize,
     fetchFeed: async (url: string, folderId: string | null) => { if (failRefresh) throw new Error("Network failed"); return parseFeed(xml, url, folderId); },
   };
   const engine = new Engine(store, join(directory, name, "runner"), dependencies);
@@ -261,6 +261,70 @@ describe("reading workflow", () => {
     await engine.settle();
     expect(engine.snapshot.opmlImport?.status).toBe("cancelled");
     expect(store.state.feeds).toHaveLength(0);
+    await engine.close();
+  });
+
+  test("proposes and applies a library organize plan, dropping invalid moves", async () => {
+    const { engine, store } = await setup("organize", async () => {}, false, undefined, async (_agent, prompt, _cwd, _signal, emit) => {
+      const feeds = JSON.parse(prompt).feeds as { id: string }[];
+      emit({ type: "delta", text: `説明\n{"moves":[{"feedId":"${feeds[0]?.id ?? ""}","folder":"Tech"},{"feedId":"missing","folder":"X"},{"feedId":"${feeds[0]?.id ?? ""}","folder":""}]}` });
+    });
+    const feed = store.state.feeds[0];
+    if (!feed) throw new Error("fixture missing");
+    await engine.dispatch({ type: "organize.propose", agent: "codex", scope: "library" });
+    await engine.settle();
+    const job = engine.snapshot.organize;
+    expect(job).toMatchObject({ scope: "library", status: "completed" });
+    expect(job?.plan?.moves).toEqual([{ feedId: feed.id, title: "Test", folderName: "Tech", newFolder: true }]);
+    await engine.dispatch({ type: "organize.apply", moves: job?.plan?.moves ?? [] });
+    const folder = store.state.folders.find((item) => item.name === "Tech");
+    expect(store.state.feeds[0]?.folderId).toBe(folder?.id);
+    expect(engine.snapshot.organize).toBeNull();
+    await engine.close();
+  });
+
+  test("fails the organize job when the response is not parseable", async () => {
+    const { engine } = await setup("organize-bad", async () => {}, false, undefined, async (_agent, _prompt, _cwd, _signal, emit) => {
+      emit({ type: "delta", text: "整理案はありません" });
+    });
+    await engine.dispatch({ type: "organize.propose", agent: "codex", scope: "library" });
+    await engine.settle();
+    expect(engine.snapshot.organize).toMatchObject({ status: "failed", detail: "整理案を解釈できませんでした。もう一度お試しください。" });
+    await engine.dispatch({ type: "organize.clear" });
+    expect(engine.snapshot.organize).toBeNull();
+    await engine.close();
+  });
+
+  test("applies opml folder assignments to preview entries only", async () => {
+    const { engine } = await setup("organize-opml", async () => {}, false, undefined, async (_agent, _prompt, _cwd, _signal, emit) => {
+      emit({ type: "delta", text: `{"assignments":[{"url":"https://a.example.com/rss","folder":"News"},{"url":"https://unknown.example.com/rss","folder":"X"}]}` });
+    });
+    const opml = `<opml version="2.0"><body><outline text="A" xmlUrl="https://a.example.com/rss"/><outline text="B" xmlUrl="https://b.example.com/rss"/></body></opml>`;
+    await expect(engine.dispatch({ type: "organize.propose", agent: "codex", scope: "opml" })).rejects.toThrow("プレビュー");
+    await engine.dispatch({ type: "opml.preview", xml: opml });
+    await engine.dispatch({ type: "organize.propose", agent: "codex", scope: "opml" });
+    await engine.settle();
+    expect(engine.snapshot.organize?.plan?.assignments).toEqual([{ url: "https://a.example.com/rss", title: "A", folderName: "News" }]);
+    await engine.dispatch({ type: "organize.apply", assignments: engine.snapshot.organize?.plan?.assignments ?? [] });
+    const entry = engine.snapshot.opmlPreview?.entries.find((item) => item.url === "https://a.example.com/rss");
+    expect(entry?.folderName).toBe("News");
+    expect(entry?.detail).toBe("フォルダ「News」を作成します。");
+    expect(engine.snapshot.organize).toBeNull();
+    await engine.close();
+  });
+
+  test("cancelling an organize job clears it", async () => {
+    let started: (() => void) | undefined;
+    const ready = new Promise<void>((resolve) => { started = resolve; });
+    const { engine } = await setup("organize-cancel", async () => {}, false, undefined, async (_agent, _prompt, _cwd, signal) => {
+      started?.();
+      await new Promise<void>((resolve) => { signal.addEventListener("abort", () => resolve(), { once: true }) });
+    });
+    await engine.dispatch({ type: "organize.propose", agent: "codex", scope: "library" });
+    await ready;
+    await engine.dispatch({ type: "organize.cancel" });
+    await engine.settle();
+    expect(engine.snapshot.organize).toBeNull();
     await engine.close();
   });
 

@@ -222,6 +222,53 @@ test("OPML preview applies only selected feeds and removes missing ones after co
 });
 
 
+test("organize dialog proposes an AI plan and applies the selected moves", async () => {
+  const dialog = window.document.querySelector('#organize-dialog');
+  if (!(dialog instanceof window.HTMLElement)) throw new Error("Missing organize dialog");
+  snapshot.connections = [{ agent: "codex", installed: true, status: "ready", detail: "fixture" }];
+  await act(async () => stream?.onmessage?.({ data: JSON.stringify({ type: "snapshot", snapshot }) }));
+  const propose = [...dialog.querySelectorAll("button")].find((button) => button.textContent?.includes("AIに整理案を作成"));
+  if (!(propose instanceof window.HTMLButtonElement)) throw new Error("Missing propose button");
+  await act(async () => propose.click());
+  expect(actions.at(-1)).toEqual({ type: "organize.propose", agent: "codex", scope: "library" });
+  const feed = snapshot.state.feeds[0];
+  if (!feed) throw new Error("Missing feed fixture");
+  snapshot.organize = { scope: "library", agent: "codex", status: "completed", startedAt: new Date().toISOString(), plan: { moves: [{ feedId: feed.id, title: feed.title, folderName: "Tech", newFolder: true }], assignments: [] } };
+  await act(async () => stream?.onmessage?.({ data: JSON.stringify({ type: "snapshot", snapshot }) }));
+  const move = dialog.querySelector(".organize-ai .opml-preview-list input[type=checkbox]");
+  if (!(move instanceof window.HTMLInputElement)) throw new Error("Missing move checkbox");
+  expect(move.checked).toBe(true);
+  expect(dialog.querySelector(".organize-ai .opml-entry-detail")?.textContent).toContain("Tech");
+  const apply = [...dialog.querySelectorAll("button")].find((button) => button.textContent?.includes("件を適用"));
+  if (!(apply instanceof window.HTMLButtonElement)) throw new Error("Missing apply button");
+  await act(async () => apply.click());
+  expect(actions.at(-1)).toEqual({ type: "organize.apply", moves: [{ feedId: feed.id, folderName: "Tech" }] });
+  delete snapshot.organize;
+  await act(async () => stream?.onmessage?.({ data: JSON.stringify({ type: "snapshot", snapshot }) }));
+});
+
+test("OPML preview asks AI for folder assignments and applies them", async () => {
+  const dialog = window.document.querySelector('#opml-dialog');
+  if (!(dialog instanceof window.HTMLElement)) throw new Error("Missing OPML dialog");
+  snapshot.opmlPreview = { entries: [{ url: "https://a.example.com/rss", title: "Feed A", folderName: null, resolution: "new" }], missingFeeds: [] };
+  await act(async () => stream?.onmessage?.({ data: JSON.stringify({ type: "snapshot", snapshot }) }));
+  const suggest = [...dialog.querySelectorAll("button")].find((button) => button.textContent?.includes("AIにフォルダ分け"));
+  if (!(suggest instanceof window.HTMLButtonElement)) throw new Error("Missing suggest button");
+  await act(async () => suggest.click());
+  expect(actions.at(-1)).toEqual({ type: "organize.propose", agent: "codex", scope: "opml" });
+  snapshot.organize = { scope: "opml", agent: "codex", status: "completed", startedAt: new Date().toISOString(), plan: { moves: [], assignments: [{ url: "https://a.example.com/rss", title: "Feed A", folderName: "News" }] } };
+  await act(async () => stream?.onmessage?.({ data: JSON.stringify({ type: "snapshot", snapshot }) }));
+  expect(dialog.textContent).toContain("フォルダ割り当て");
+  const apply = [...dialog.querySelectorAll(".organize-banner button")].find((button) => button.textContent === "適用");
+  if (!(apply instanceof window.HTMLButtonElement)) throw new Error("Missing apply button");
+  await act(async () => apply.click());
+  expect(actions.at(-1)).toEqual({ type: "organize.apply", assignments: [{ url: "https://a.example.com/rss", folderName: "News" }] });
+  delete snapshot.organize;
+  delete snapshot.opmlPreview;
+  snapshot.connections = [];
+  await act(async () => stream?.onmessage?.({ data: JSON.stringify({ type: "snapshot", snapshot }) }));
+});
+
 test("OPML upload rejects invalid UTF-8 without sending mangled folder names", async () => {
   const input = window.document.querySelector('#opml-file');
   const form = window.document.querySelector('#opml-dialog form');

@@ -105,12 +105,26 @@ export const opmlPreviewSchema = z.object({
 });
 export type OpmlPreview = z.infer<typeof opmlPreviewSchema>;
 
+export const organizeJobSchema = z.object({
+  scope: z.enum(["library", "opml"]),
+  agent: agentSchema,
+  status: z.enum(["running", "completed", "failed"]),
+  startedAt: z.string(),
+  detail: z.string().optional(),
+  plan: z.object({
+    moves: z.array(z.object({ feedId: z.string(), title: z.string(), folderName: z.string(), newFolder: z.boolean() })),
+    assignments: z.array(z.object({ url: z.string(), title: z.string(), folderName: z.string() })),
+  }).optional(),
+});
+export type OrganizeJob = z.infer<typeof organizeJobSchema>;
+
 export const snapshotSchema = z.object({
   state: stateSchema,
   connections: z.array(connectionSchema),
   refreshing: z.boolean(),
   opmlImport: opmlImportSchema.nullable().optional(),
   opmlPreview: opmlPreviewSchema.nullable().optional(),
+  organize: organizeJobSchema.nullable().optional(),
 });
 export type Snapshot = z.infer<typeof snapshotSchema>;
 
@@ -134,6 +148,14 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("opml.stop") }),
   z.object({ type: z.literal("refresh") }),
   z.object({ type: z.literal("connections.refresh") }),
+  z.object({ type: z.literal("organize.propose"), agent: agentSchema, scope: z.enum(["library", "opml"]) }),
+  z.object({
+    type: z.literal("organize.apply"),
+    moves: z.array(z.object({ feedId: z.string(), folderName: z.string().trim().min(1).max(60) })).max(200).optional(),
+    assignments: z.array(z.object({ url: z.string().max(2048), folderName: z.string().trim().min(1).max(60) })).max(200).optional(),
+  }),
+  z.object({ type: z.literal("organize.cancel") }),
+  z.object({ type: z.literal("organize.clear") }),
   z.object({ type: z.literal("chat.send"), articleId: z.string(), agent: agentSchema, text: z.string().trim().min(1).max(4000) }),
   z.object({ type: z.literal("chat.summarize"), articleId: z.string(), agent: agentSchema }),
   z.object({ type: z.literal("chat.stop"), conversationId: z.string() }),
