@@ -12,7 +12,7 @@ Bring your own CLI login. Reedar uses the agent's existing service access and us
 >
 > **Download limitations:** the DMG / ZIP previews use ad-hoc signing and are **not notarized**. macOS may block a downloaded app. Installation on another Mac and Intel execution have not been verified. See [Distribution](docs/distribution.md) before installing a build.
 
-[Download v0.1.2 — first public preview](https://github.com/YunosukeYoshino/reedar/releases/tag/v0.1.2)
+[Download v0.1.2 — first public preview](https://github.com/YunosukeYoshino/open-reedar/releases/tag/v0.1.2)
 
 [Getting started](#getting-started) · [Agent support](#agent-support) · [Roadmap](ROADMAP.md) · [Contributing](CONTRIBUTING.md) · [Validation](docs/validation.md) · [Distribution](docs/distribution.md)
 
@@ -25,7 +25,7 @@ Bring your own CLI login. Reedar uses the agent's existing service access and us
 - **Conversations that stay with the article:** local history includes a snapshot of the source text used for the conversation.
 - **Clear execution states:** running, waiting, completed, failed, and cancelled, with a stop control that preserves partial answers.
 - **Keyboard navigation:** move through articles and manage reading state without leaving the keyboard.
-- **Terminal and agent harnesses:** a `reedar` CLI lists feeds with unread status, browses and prints articles, and summarizes them through your signed-in agent CLIs; a one-click installer also drops a skill into Claude/Codex/generic agent skill directories so coding agents can call it.
+- **Terminal and agent harnesses:** a `open-reedar` CLI lists feeds with unread status, browses and prints articles, and summarizes them through your signed-in agent CLIs; a one-click installer also drops a skill into Claude/Codex/generic agent skill directories so coding agents can call it.
 
 AI requests are explicit and apply to the selected article. AI activity does not change whether you have read an article.
 
@@ -39,7 +39,7 @@ AI requests are explicit and apply to the selected article. AI activity does not
 
 ### Install the preview
 
-Download the DMG from the [v0.2.0 release](https://github.com/YunosukeYoshino/reedar/releases/tag/v0.2.0), open it, and drag Reedar into Applications. The ZIP is an alternative containing the same app. Neither Bun nor a source checkout is required. The release includes a SHA-256 manifest and the preview limitations above.
+Download the DMG from the [v0.2.0 release](https://github.com/YunosukeYoshino/open-reedar/releases/tag/v0.2.0), open it, and drag Reedar into Applications. The ZIP is an alternative containing the same app. Neither Bun nor a source checkout is required. The release includes a SHA-256 manifest and the preview limitations above.
 
 ### Run the desktop app
 
@@ -107,16 +107,16 @@ See the [validation record](docs/validation.md) for tested versions, evidence, a
 
 ## Reedar CLI
 
-Choose **CLIとスキルをインストール** in **エージェント接続** to place a `reedar` command at `~/.local/bin/reedar` plus a skill file in `~/.claude/skills/reedar`, `~/.codex/skills/reedar`, and `~/.agents/skills/reedar`. The CLI reads `~/Library/Application Support/Reedar/reader.json` directly (read-only; the app does not need to be running) and supports:
+Choose **CLIとスキルをインストール** in **エージェント接続** to place a `open-reedar` command at `~/.local/bin/open-reedar` plus a skill file in `~/.claude/skills/open-reedar`, `~/.codex/skills/open-reedar`, and `~/.agents/skills/open-reedar`. The CLI reads `~/Library/Application Support/Reedar/reader.json` directly (read-only; the app does not need to be running) and supports:
 
 ```sh
-reedar feeds                              # feeds with unread/star counts
-reedar articles --unread --feed hnrss     # newest-first listing
-reedar article <id>                       # full article text (prefix ids ok)
-reedar summarize <id>                     # summary via your signed-in agent CLI
+open-reedar feeds                              # feeds with unread/star counts
+open-reedar articles --unread --feed hnrss     # newest-first listing
+open-reedar article <id>                       # full article text (prefix ids ok)
+open-reedar summarize <id>                     # summary via your signed-in agent CLI
 ```
 
-List commands emit JSON Lines, stdout defaults to JSON when piped, and errors go to stderr — the surface is designed for coding agents and `jq` pipelines. `summarize` reuses the app's agent adapter (Codex or Claude login required). Override the library path with `REEDAR_STORE`. Packaged builds ship a compiled binary at `Contents/Resources/bin/reedar`; development installs shim to `bun src/cli/reedar.ts`.
+List commands emit JSON Lines, stdout defaults to JSON when piped, and errors go to stderr — the surface is designed for coding agents and `jq` pipelines. `summarize` reuses the app's agent adapter (Codex or Claude login required). Override the library path with `REEDAR_STORE`. Packaged builds ship a compiled binary at `Contents/Resources/bin/open-reedar`; development installs shim to `bun src/cli/open-reedar.ts`.
 
 ## Keyboard shortcuts
 
@@ -165,7 +165,7 @@ Open the URL printed by `bun run dev`. The server uses a fresh session and an av
 
 Both desktop and browser development accept `REEDAR_DATA_DIR` to choose a separate library directory. Without it, the default locations above apply. Browser development also accepts `REEDAR_PORT` to choose a port. A separate data directory is useful for testing an empty library without changing your normal subscriptions.
 
-The [CI workflow](.github/workflows/ci.yml) runs these checks on pull requests and pushes to `main`, without live model requests. See [GitHub Actions](https://github.com/YunosukeYoshino/reedar/actions) for hosted results.
+The [CI workflow](.github/workflows/ci.yml) runs these checks on pull requests and pushes to `main`, without live model requests. See [GitHub Actions](https://github.com/YunosukeYoshino/open-reedar/actions) for hosted results.
 
 Built with **Electron, React, TypeScript, and Bun**. Source lives in `src/main` (desktop host and local services), `src/ui` (reader interface), and `src/shared` (validated data contracts). See [Contributing](CONTRIBUTING.md) for the repository map and workflow.
 

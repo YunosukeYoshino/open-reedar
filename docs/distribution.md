@@ -57,7 +57,7 @@ The workflow pins action revisions, runs the automated checks, and packages on a
 
 For a manual release instead, create a GitHub Release from the intended source tag and attach the same files. Describe the architecture, source commit, signing status, and known agent limitations in the release notes.
 
-The public repository is [YunosukeYoshino/reedar](https://github.com/YunosukeYoshino/reedar). The [v0.1.2 prerelease](https://github.com/YunosukeYoshino/reedar/releases/tag/v0.1.2) contains the first downloadable preview. See [GitHub Actions](https://github.com/YunosukeYoshino/reedar/actions) for current hosted checks and packaging runs. Release notes identify which build produced the attached archives.
+The public repository is [YunosukeYoshino/open-reedar](https://github.com/YunosukeYoshino/open-reedar). The [v0.1.2 prerelease](https://github.com/YunosukeYoshino/open-reedar/releases/tag/v0.1.2) contains the first downloadable preview. See [GitHub Actions](https://github.com/YunosukeYoshino/open-reedar/actions) for current hosted checks and packaging runs. Release notes identify which build produced the attached archives.
 
 ## Developer ID releases
 

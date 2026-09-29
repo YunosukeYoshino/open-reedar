@@ -1,6 +1,6 @@
 # Roadmap
 
-Current development baseline: **0.1.3 (unreleased)**, September 12, 2026. Reedar runs locally on macOS with verified Codex reading and locally built Apple Silicon previews. The first public prerelease is [v0.1.2](https://github.com/YunosukeYoshino/reedar/releases/tag/v0.1.2).
+Current development baseline: **0.1.3 (unreleased)**, September 12, 2026. Reedar runs locally on macOS with verified Codex reading and locally built Apple Silicon previews. The first public prerelease is [v0.1.2](https://github.com/YunosukeYoshino/open-reedar/releases/tag/v0.1.2).
 
 Checked items are implemented and validated within the scope stated. Unchecked items are proposed work, not release-date commitments. The sections below have separate completion criteria: daily-reader improvements and additional providers do not all need to ship before a first public preview.
 
@@ -33,13 +33,13 @@ The repository and first downloadable preview are public. Installation on anothe
 
 - [x] **Choose the source license.** MIT license added with matching project metadata and packaging configuration.
 - [x] **State preview limitations.** README and distribution notes identify Apple Silicon / Codex verification, ad-hoc signing, missing notarization, and unverified installation on another Mac.
-- [x] **Publish the repository.** Source is available at [YunosukeYoshino/reedar](https://github.com/YunosukeYoshino/reedar).
-- [x] **Run checks on pull requests.** Automatic typecheck, test, and build CI is configured for pull requests and pushes to main. Hosted results are available in [GitHub Actions](https://github.com/YunosukeYoshino/reedar/actions).
+- [x] **Publish the repository.** Source is available at [YunosukeYoshino/open-reedar](https://github.com/YunosukeYoshino/open-reedar).
+- [x] **Run checks on pull requests.** Automatic typecheck, test, and build CI is configured for pull requests and pushes to main. Hosted results are available in [GitHub Actions](https://github.com/YunosukeYoshino/open-reedar/actions).
 - [x] **Validate hosted packaging.** The macOS workflow passed for v0.1.2. Downloaded archives passed SHA-256, DMG, ZIP, and extracted-app signature verification.
 - [x] **Publish a tagged preview.** The v0.1.2 prerelease includes DMG, ZIP, checksums, features, architecture, signing status, and supported-agent limitations.
 - [ ] **Document a fresh installation.** Test on another Apple Silicon Mac with no source checkout, including reading without a CLI and connecting a supported CLI; add a short, non-personal screenshot or demo to the README.
 
-See [Distribution](docs/distribution.md) for the build procedure and [v0.1.2](https://github.com/YunosukeYoshino/reedar/releases/tag/v0.1.2) for the published artifacts and limitations.
+See [Distribution](docs/distribution.md) for the build procedure and [v0.1.2](https://github.com/YunosukeYoshino/open-reedar/releases/tag/v0.1.2) for the published artifacts and limitations.
 
 ## Daily reading — proposed next product work
 
