@@ -30,6 +30,7 @@ export class Engine {
   cliInstall: CliInstall | null = null;
   private importJob: { controller: AbortController; done: Promise<void> } | undefined;
   private organizeRun: { controller: AbortController; done: Promise<void> } | undefined;
+  private autoRefreshTimer: ReturnType<typeof setInterval> | undefined;
   private listeners = new Set<(update: Update) => void>();
   private jobs = new Map<string, { controller: AbortController; done: Promise<void> }>();
 
@@ -41,7 +42,18 @@ export class Engine {
 
   async initialize() {
     await mkdir(this.runnerDirectory, { recursive: true, mode: 0o700 });
+    this.scheduleAutoRefresh();
     await this.refreshConnections();
+  }
+
+  private scheduleAutoRefresh() {
+    if (this.autoRefreshTimer) clearInterval(this.autoRefreshTimer);
+    this.autoRefreshTimer = undefined;
+    const minutes = this.store.state.refreshMinutes;
+    if (minutes > 0) {
+      this.autoRefreshTimer = setInterval(() => { void this.refreshFeeds(true); }, minutes * 60_000);
+      this.autoRefreshTimer.unref();
+    }
   }
 
   get snapshot(): Snapshot { return { state: this.store.state, connections: this.connections, refreshing: this.refreshing, opmlImport: this.opmlImport, opmlPreview: this.opmlPreview, organize: this.organize, cliInstall: this.cliInstall }; }
@@ -79,7 +91,7 @@ export class Engine {
         }
         if (existing) throw new Error(this.t("err.feedExists"));
         const result = await this.dependencies.fetchFeed(url, this.store.folder(action.folderId), undefined, this.store.state.language);
-        this.store.mergeFeed(result.feed, result.articles);
+        this.store.mergeFeed({ ...result.feed, etag: result.etag, lastModified: result.lastModified }, result.articles);
         break;
       }
       case "feed.remove":
@@ -111,6 +123,7 @@ export class Engine {
       case "article.fetchText": return this.fetchArticleText(action.id);
       case "article.star": this.store.article(action.id).starred = action.starred; break;
       case "app.setLanguage": this.store.state.language = action.language; void this.refreshConnections(); break;
+      case "app.setRefreshInterval": this.store.state.refreshMinutes = action.minutes; this.scheduleAutoRefresh(); break;
       case "opml.import": return this.importOpml(action.xml, action.urls, action.folders);
       case "opml.preview": return this.previewOpml(action.xml);
       case "opml.previewClear": this.opmlPreview = null; this.changed(); return;
@@ -124,7 +137,7 @@ export class Engine {
         this.changed();
         return;
       }
-      case "refresh": return this.refreshFeeds();
+      case "refresh": return this.refreshFeeds(action.automatic === true);
       case "connections.refresh": return this.refreshConnections();
       case "cli.install": return this.installCli();
       case "chat.send": return this.send(action.articleId, action.agent, action.text);
@@ -335,21 +348,35 @@ export class Engine {
     this.organize = null;
   }
 
-  private async refreshFeeds() {
+  private async refreshFeeds(automatic: boolean) {
     if (this.refreshing) return;
     this.refreshing = true;
     this.changed();
+    const now = new Date().toISOString();
     try {
-      const feeds = this.store.state.feeds.filter((feed) => !feed.removedAt);
+      const feeds = this.store.state.feeds.filter((feed) => !feed.removedAt && (!automatic || !feed.backoffUntil || feed.backoffUntil <= now));
       for (let offset = 0; offset < feeds.length; offset += 4) {
         await Promise.all(feeds.slice(offset, offset + 4).map(async (feed) => {
+          const current = () => this.store.state.feeds.find((item) => item.id === feed.id);
           try {
-            const result = await this.dependencies.fetchFeed(feed.url, feed.folderId, undefined, this.store.state.language);
-            const current = this.store.state.feeds.find((item) => item.id === feed.id);
-            if (current && !current.removedAt) this.store.mergeFeed({ ...result.feed, folderId: current.folderId }, result.articles);
+            const result = await this.dependencies.fetchFeed(feed.url, feed.folderId, undefined, this.store.state.language, { etag: feed.etag, lastModified: feed.lastModified });
+            const merged = current();
+            if (!merged || merged.removedAt) return;
+            if (result.notModified) {
+              merged.updatedAt = new Date().toISOString();
+              merged.error = null;
+              merged.failures = 0;
+              delete merged.backoffUntil;
+              return;
+            }
+            this.store.mergeFeed({ ...result.feed, folderId: merged.folderId, etag: result.etag, lastModified: result.lastModified }, result.articles);
           } catch (error) {
-            const current = this.store.state.feeds.find((item) => item.id === feed.id);
-            if (current) current.error = error instanceof Error ? error.message : this.t("err.updateFailed");
+            const merged = current();
+            if (merged) {
+              merged.error = error instanceof Error ? error.message : this.t("err.updateFailed");
+              merged.failures = (merged.failures ?? 0) + 1;
+              merged.backoffUntil = new Date(Date.now() + Math.min(merged.failures * merged.failures, 24) * 5 * 60_000).toISOString();
+            }
           }
         }));
         await this.store.save();
@@ -443,6 +470,8 @@ export class Engine {
   async settle() { await Promise.all([...this.jobs.values()].map((job) => job.done).concat(this.importJob ? [this.importJob.done] : []).concat(this.organizeRun ? [this.organizeRun.done] : [])); }
 
   async close() {
+    if (this.autoRefreshTimer) clearInterval(this.autoRefreshTimer);
+    this.autoRefreshTimer = undefined;
     this.importJob?.controller.abort();
     this.organizeRun?.controller.abort();
     for (const job of this.jobs.values()) job.controller.abort();

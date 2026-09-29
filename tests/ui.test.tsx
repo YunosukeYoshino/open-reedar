@@ -31,7 +31,7 @@ beforeAll(async () => {
   root = createRoot(container as unknown as HTMLElement);
   await act(async () => root.render(<App />));
   const parsed = await parseFeed('<rss version="2.0"><channel><title>Test feed</title><link>https://example.com</link><item><guid>one</guid><title>First article</title><description>First body</description></item><item><guid>two</guid><title>Second article</title><description>Second body</description></item></channel></rss>', "https://example.com/rss", null);
-  snapshot = { state: { version: 1, language: "en", folders: [], feeds: [parsed.feed], articles: parsed.articles, conversations: [] }, connections: [], refreshing: false };
+  snapshot = { state: { version: 1, language: "en", folders: [], feeds: [parsed.feed], articles: parsed.articles, conversations: [], refreshMinutes: 0 }, connections: [], refreshing: false };
   await act(async () => { stream?.onopen?.(); stream?.onmessage?.({ data: JSON.stringify({ type: "snapshot", snapshot }) }); });
 });
 afterAll(async () => {

@@ -16,6 +16,10 @@ const en = {
   // Sidebar
   "sidebar.library": "Library",
   "sidebar.refreshFeeds": "Refresh feeds",
+  "sidebar.autoRefresh": "Auto-refresh",
+  "sidebar.refreshOff": "Off",
+  "sidebar.refreshMin": "{minutes} min",
+  "sidebar.refreshHour": "{hours} hr",
   "sidebar.addFeed": "Add a feed",
   "sidebar.addFirstFeed": "Add your first feed",
   "sidebar.navKind": "Article kinds",
@@ -433,6 +437,10 @@ const ja: Record<MessageKey, string> = {
 
   "sidebar.library": "ライブラリ",
   "sidebar.refreshFeeds": "フィードを更新",
+  "sidebar.autoRefresh": "自動更新",
+  "sidebar.refreshOff": "オフ",
+  "sidebar.refreshMin": "{minutes}分",
+  "sidebar.refreshHour": "{hours}時間",
   "sidebar.addFeed": "フィードを追加",
   "sidebar.addFirstFeed": "最初のフィードを追加",
   "sidebar.navKind": "記事の種類",

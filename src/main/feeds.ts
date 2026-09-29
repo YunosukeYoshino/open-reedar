@@ -87,11 +87,19 @@ export function decodeBody(body: Buffer, contentType: string) {
   catch { return body.toString("utf8"); }
 }
 
-export async function loadFeed(url: string, folderId: string | null, signal?: AbortSignal, lang: Language = "en") {
-  const result = await fetchPublic(url, 0, signal, lang);
+export type FeedResult = { feed: Feed; articles: Article[]; etag?: string; lastModified?: string; notModified?: boolean };
+
+export async function loadFeed(url: string, folderId: string | null, signal?: AbortSignal, lang: Language = "en", cache?: { etag?: string; lastModified?: string }): Promise<FeedResult> {
+  const headers: Record<string, string> = {};
+  if (cache?.etag) headers["If-None-Match"] = cache.etag;
+  if (cache?.lastModified) headers["If-Modified-Since"] = cache.lastModified;
+  const result = await fetchPublic(url, 0, signal, lang, headers);
+  if (result.notModified) return { feed: { id: hash(url), url, title: "", siteUrl: "", folderId, updatedAt: null, error: null }, articles: [] as Article[], notModified: true };
   const xml = decodeBody(result.body, result.contentType);
-  try { return await parseFeed(xml, url, folderId, undefined, lang); }
-  catch (error) {
+  try {
+    const parsed = await parseFeed(xml, url, folderId, undefined, lang);
+    return { ...parsed, etag: result.etag, lastModified: result.lastModified };
+  } catch (error) {
     if (error instanceof FeedUserError) throw error;
     throw new FeedUserError(t(lang, "err.notAFeed"), { cause: error });
   }
