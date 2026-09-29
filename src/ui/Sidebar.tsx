@@ -24,7 +24,7 @@ export function Sidebar({ state, scope, filter, refreshing, markReadUndo, select
   const feedRow = (feed: ReaderState["feeds"][number]) => {
     const count = state.articles.filter((article) => article.feedId === feed.id && !article.read).length;
     return <div className={`feed-row-wrap ${scope.type === "feed" && scope.id === feed.id ? "selected" : ""}`} key={feed.id}>
-      <button className="nav-row feed-row" onClick={() => select({ type: "feed", id: feed.id })} title={feed.error ?? feed.title}>
+      <button className="nav-row feed-row" onClick={() => select({ type: "feed", id: feed.id })} title={feed.error ?? feed.title} aria-label={feed.error ? `${feed.title}: ${t("sidebar.updateError")}: ${feed.error}` : undefined}>
         <span className="feed-monogram" data-tone={tone(feed.title)}>{feed.title.slice(0, 1)}</span><span className="nav-label">{feed.title}</span>
         {feed.error ? <span className="feed-error-dot" aria-label={t("sidebar.updateError")} /> : count > 0 ? <span className="nav-count">{count}</span> : null}
       </button>
