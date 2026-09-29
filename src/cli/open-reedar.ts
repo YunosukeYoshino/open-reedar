@@ -10,12 +10,12 @@ import type { AgentEvent } from "../main/agents/reader";
 const USAGE = `Reedar CLI — read your local Reedar library.
 
 Usage:
-  reedar feeds [--json]                 Feed list with unread/star counts (excludes removed feeds)
-  reedar articles [--unread] [--starred] [--feed <text>] [--limit N] [--json]
+  open-reedar feeds [--json]                 Feed list with unread/star counts (excludes removed feeds)
+  open-reedar articles [--unread] [--starred] [--feed <text>] [--limit N] [--json]
                                         Articles, newest first (default limit 50)
                                         --json prints JSON Lines (one object per line) for piping
-  reedar article <id> [--json]          One article with full text
-  reedar summarize <id> [--agent codex|claude] [--question <text>]
+  open-reedar article <id> [--json]          One article with full text
+  open-reedar summarize <id> [--agent codex|claude] [--question <text>]
                                         Ask an installed agent CLI to summarize/answer about an article
 
 Output defaults to JSON when stdout is not a TTY (agents get data without --json).
@@ -106,7 +106,7 @@ export async function cli(argv: string[], io: Io, run: typeof runReader = runRea
     }
     const id = positional(args)[0];
     if (command === "article") {
-      if (!id) { err("Usage: reedar article <id>"); return 1; }
+      if (!id) { err("Usage: open-reedar article <id>"); return 1; }
       const article = findArticle(state, id);
       const feed = state.feeds.find((feed) => feed.id === article.feedId);
       if (json) out(JSON.stringify(article, null, 2));
@@ -114,7 +114,7 @@ export async function cli(argv: string[], io: Io, run: typeof runReader = runRea
       return 0;
     }
     if (command === "summarize") {
-      if (!id) { err("Usage: reedar summarize <id> [--agent codex|claude] [--question <text>]"); return 1; }
+      if (!id) { err("Usage: open-reedar summarize <id> [--agent codex|claude] [--question <text>]"); return 1; }
       const agent = (option(args, "agent") ?? "codex") as Agent;
       if (!agentSchema.options.includes(agent)) { err(`不明なエージェントです: ${agent}`); return 1; }
       const article = findArticle(state, id);

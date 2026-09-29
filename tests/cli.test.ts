@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cli } from "../src/cli/reedar";
+import { cli } from "../src/cli/open-reedar";
 import { installCli } from "../src/main/cli-install";
 import { parseFeed } from "../src/main/feeds";
 import { Store } from "../src/main/store";
@@ -109,15 +109,15 @@ describe("cli install", () => {
   test("writes a shim into ~/.local/bin and skill files into agent directories", async () => {
     const home = join(directory, "home");
     const result = await installCli({ home });
-    expect(result.bin).toBe(join(home, ".local", "bin", "reedar"));
+    expect(result.bin).toBe(join(home, ".local", "bin", "open-reedar"));
     const shim = await readFile(result.bin, "utf8");
-    expect(shim).toContain("reedar.ts");
+    expect(shim).toContain("open-reedar.ts");
     expect((await stat(result.bin)).mode & 0o111).toBeGreaterThan(0);
     expect(result.skills).toHaveLength(3);
     for (const skill of result.skills) {
       const content = await readFile(skill, "utf8");
-      expect(content).toContain("name: reedar");
-      expect(content).toContain("reedar feeds");
+      expect(content).toContain("name: open-reedar");
+      expect(content).toContain("open-reedar feeds");
     }
   });
 
@@ -127,7 +127,7 @@ describe("cli install", () => {
     const { Engine } = await import("../src/main/engine");
     const engine = new Engine(store, join(directory, "engine", "runner"), { connect: async (agent) => ({ agent, installed: false, status: "unavailable", detail: "" }) });
     await engine.dispatch({ type: "cli.install" });
-    expect(engine.snapshot.cliInstall?.bin).toContain("reedar");
+    expect(engine.snapshot.cliInstall?.bin).toContain("open-reedar");
     await engine.close();
     delete process.env.REEDAR_HOME;
   });

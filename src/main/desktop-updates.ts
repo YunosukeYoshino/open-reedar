@@ -9,7 +9,7 @@ import { AppUpdates, newestRelease } from "./updates";
 import type { UpdateNotice } from "./updates";
 import { fetchPublic } from "./network";
 
-const releasePage = "https://github.com/YunosukeYoshino/reedar/releases";
+const releasePage = "https://github.com/YunosukeYoshino/open-reedar/releases";
 const exec = promisify(execFile);
 
 async function supportsAutomaticInstall() {
@@ -59,7 +59,7 @@ export async function createDesktopUpdates(window: BrowserWindow, prepareToInsta
           const result = await updater.checkForUpdates();
           return result?.isUpdateAvailable ? result.updateInfo.version : null;
         }
-        const response = await fetchPublic("https://api.github.com/repos/YunosukeYoshino/reedar/releases?per_page=100", 0, lifetime.signal);
+        const response = await fetchPublic("https://api.github.com/repos/YunosukeYoshino/open-reedar/releases?per_page=100", 0, lifetime.signal);
         return newestRelease(JSON.parse(response.body.toString("utf8")) as unknown, app.getVersion(), process.arch);
       },
       download: async (progress) => {

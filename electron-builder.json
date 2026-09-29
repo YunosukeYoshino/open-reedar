@@ -9,14 +9,14 @@
   },
   "files": [
     "dist/**/*",
-    "!dist/reedar",
+    "!dist/open-reedar",
     "package.json"
   ],
   "artifactName": "Reedar-${version}-mac-${arch}-preview.${ext}",
   "publish": {
     "provider": "github",
     "owner": "YunosukeYoshino",
-    "repo": "reedar",
+    "repo": "open-reedar",
     "channel": "latest",
     "releaseType": "prerelease"
   },
@@ -48,8 +48,8 @@
       "to": "Resources/licenses/LICENSES.chromium.html"
     },
     {
-      "from": "dist/reedar",
-      "to": "Resources/bin/reedar"
+      "from": "dist/open-reedar",
+      "to": "Resources/bin/open-reedar"
     }
   ]
 }

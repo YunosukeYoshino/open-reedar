@@ -1,5 +1,5 @@
 {
-  "name": "reedar",
+  "name": "open-reedar",
   "version": "0.2.0",
   "license": "MIT",
   "private": true,
@@ -14,7 +14,7 @@
     "test": "bun test",
     "check": "bun run typecheck && bun test && bun run build",
     "icons": "bun scripts/icons.ts",
-    "dist:cli": "bun build --compile --minify src/cli/reedar.ts --outfile dist/reedar",
+    "dist:cli": "bun build --compile --minify src/cli/open-reedar.ts --outfile dist/open-reedar",
     "dist:mac": "bun run build && bun run icons && bun run dist:cli && electron-builder --mac --publish never",
     "dist:mac:signed": "bun run dist:mac --config electron-builder.signed.cjs",
     "checksums": "cd release && shasum -a 256 *.dmg *.zip > SHA256SUMS.txt"
