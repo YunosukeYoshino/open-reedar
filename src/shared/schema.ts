@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const agentSchema = z.enum(["claude", "codex", "antigravity"]);
+export const agentSchema = z.enum(["claude", "codex", "antigravity", "apple"]);
 export type Agent = z.infer<typeof agentSchema>;
 export const codexModel = "gpt-6-luna";
 

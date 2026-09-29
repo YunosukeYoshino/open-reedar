@@ -126,6 +126,48 @@ describe("reading context", () => {
       else process.env.REEDAR_ANTIGRAVITY_BIN = previous;
     }
   });
+  test("Apple Intelligence reports ready when fm is installed", async () => {
+    const previous = process.env.REEDAR_APPLE_BIN;
+    process.env.REEDAR_APPLE_BIN = process.execPath;
+    try {
+      const result = await connection("apple", directory);
+      expect(result).toMatchObject({ agent: "apple", installed: true, status: "ready" });
+    } finally {
+      if (previous === undefined) delete process.env.REEDAR_APPLE_BIN;
+      else process.env.REEDAR_APPLE_BIN = previous;
+    }
+  });
+  test("runReader streams fm respond output for the Apple agent", async () => {
+    const fm = join(directory, "fm");
+    await writeFile(fm, "#!/bin/sh\nprintf 'digest answer'\n");
+    await Bun.spawn(["chmod", "+x", fm]).exited;
+    const previous = process.env.REEDAR_APPLE_BIN;
+    process.env.REEDAR_APPLE_BIN = fm;
+    try {
+      const output: string[] = [];
+      await runReader("apple", { ...conversation, agent: "apple" }, "要約して", directory, new AbortController().signal, (event) => { if (event.type === "delta") output.push(event.text); });
+      expect(output.at(-1)).toBe("digest answer");
+    } finally {
+      if (previous === undefined) delete process.env.REEDAR_APPLE_BIN;
+      else process.env.REEDAR_APPLE_BIN = previous;
+    }
+  });
+  test("runReader truncates oversized article text for the on-device Apple model", async () => {
+    const fm = join(directory, "fm-long");
+    await writeFile(fm, "#!/bin/sh\necho -n \"$2\" | wc -c\n");
+    await Bun.spawn(["chmod", "+x", fm]).exited;
+    const previous = process.env.REEDAR_APPLE_BIN;
+    process.env.REEDAR_APPLE_BIN = fm;
+    try {
+      const big = { ...conversation, agent: "apple" as const, source: { ...conversation.source, text: "a".repeat(100_000) } };
+      const output: string[] = [];
+      await runReader("apple", big, "要約して", directory, new AbortController().signal, (event) => { if (event.type === "delta") output.push(event.text); });
+      expect(Number(output.at(-1))).toBeLessThan(31_000);
+    } finally {
+      if (previous === undefined) delete process.env.REEDAR_APPLE_BIN;
+      else process.env.REEDAR_APPLE_BIN = previous;
+    }
+  });
   test("article instructions stay quoted and cancelled output does not become successful conversation history", () => {
     const prompt: unknown = JSON.parse(readerPrompt(conversation, "根拠を説明して"));
     expect(prompt).toMatchObject({ question: "根拠を説明して", source: { text: conversation.source.text }, history: [{ role: "user", text: "要約して" }, { role: "assistant", text: "要約" }] });

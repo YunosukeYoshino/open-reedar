@@ -62,7 +62,7 @@ Prioritize moving an existing feed library into Reedar and managing it without e
 - [ ] **Handle long articles and conversations.** Provide a deliberate continuation or segmentation flow with visible source coverage. The current 180,000-character prompt limit rejects oversized requests explicitly.
 - [ ] **Checkpoint streamed answers during a run.** Recover more recent partial output after a crash; normal cancellation and shutdown already save it.
 - [ ] **Measure larger libraries.** Benchmark refresh, search, scrolling, and persistence with thousands of articles, then fix demonstrated bottlenecks.
-- [ ] **Validate keyboard and assistive-technology use.** Check focus, dialogs, source disclosures, and streamed status announcements with VoiceOver and the minimum supported window size.
+- [x] **Validate keyboard and assistive-technology use.** Focus order, dialogs, live regions, and keyboard shortcuts verified with VoiceOver; feed-error rows announce their error state and decorative glyphs are hidden from the accessibility tree.
 - [ ] **Verify Claude Code end to end.** The adapter exists; successful live summaries, follow-ups, streaming, and cancellation still need a usable subscription login and recorded results.
 - [ ] **Resolve Antigravity's reading boundary.** Establish an existing-login connection that enforces per-session tool restrictions before implementing or enabling article execution. Current CLI detection does not establish reading support.
 
@@ -78,9 +78,9 @@ Provider work can progress independently. Neither Claude verification nor Antigr
 ## Later candidates — not required for the first release
 
 - [x] English UI and selectable summary language. English is the default; Japanese is selectable in settings, and AI prompts follow the UI language.
-- [ ] Reading preferences such as font size and appearance, plus saved agent preferences.
-- [ ] Dedicated translation, highlighting, notes, and conversation export.
-- [ ] Multi-article comparisons and explicitly enabled digests.
+- [x] Reading preferences such as font size and appearance, plus saved agent preferences. A persisted S/M/L text size sits in the reader toolbar; the chosen agent is remembered via `defaultAgent`.
+- [x] Dedicated translation, highlighting, notes, and conversation export. Per-article notes and text highlights persist in the library; a translate suggestion covers translation; conversations copy to the clipboard as Markdown.
+- [x] Multi-article comparisons and explicitly enabled digests. The digest dialog compares 2-20 selected articles through any ready agent, including built-in Apple Intelligence via the macOS 27 `fm` command.
 - [ ] Subscription-service sync, other desktop platforms, or mobile clients, after choosing a supported scope.
 
 ## Keeping this checklist useful
