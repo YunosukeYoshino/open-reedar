@@ -118,6 +118,9 @@ export const organizeJobSchema = z.object({
 });
 export type OrganizeJob = z.infer<typeof organizeJobSchema>;
 
+export const cliInstallSchema = z.object({ bin: z.string(), skills: z.array(z.string()) });
+export type CliInstall = z.infer<typeof cliInstallSchema>;
+
 export const snapshotSchema = z.object({
   state: stateSchema,
   connections: z.array(connectionSchema),
@@ -125,6 +128,7 @@ export const snapshotSchema = z.object({
   opmlImport: opmlImportSchema.nullable().optional(),
   opmlPreview: opmlPreviewSchema.nullable().optional(),
   organize: organizeJobSchema.nullable().optional(),
+  cliInstall: cliInstallSchema.nullable().optional(),
 });
 export type Snapshot = z.infer<typeof snapshotSchema>;
 
@@ -157,6 +161,7 @@ export const actionSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("organize.cancel") }),
   z.object({ type: z.literal("organize.clear") }),
+  z.object({ type: z.literal("cli.install") }),
   z.object({ type: z.literal("chat.send"), articleId: z.string(), agent: agentSchema, text: z.string().trim().min(1).max(4000) }),
   z.object({ type: z.literal("chat.summarize"), articleId: z.string(), agent: agentSchema }),
   z.object({ type: z.literal("chat.stop"), conversationId: z.string() }),
