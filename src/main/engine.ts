@@ -5,7 +5,7 @@ import type { Action, Agent, CliInstall, Connection, Conversation, OpmlImport, O
 import { agentSchema, codexModel } from "../shared/schema";
 import { agentError, AuthenticationRequired, connection, LocalizedError, runOrganizer, runReader } from "./agents/reader";
 import { loadArticleText } from "./article-text";
-import { loadFeed } from "./feeds";
+import { discoverFeeds, loadFeed } from "./feeds";
 import { parseOpml } from "./opml";
 import { publicUrl } from "./network";
 import { Store } from "./store";
@@ -13,8 +13,8 @@ import { installCli } from "./cli-install";
 import { defaultLanguage, t } from "../shared/i18n";
 import type { MessageKey } from "../shared/i18n";
 
-type Dependencies = { fetchArticleText: typeof loadArticleText; fetchFeed: typeof loadFeed; run: typeof runReader; connect: typeof connection; organize: typeof runOrganizer };
-const defaults: Dependencies = { fetchArticleText: loadArticleText, fetchFeed: loadFeed, run: runReader, connect: connection, organize: runOrganizer };
+type Dependencies = { fetchArticleText: typeof loadArticleText; fetchFeed: typeof loadFeed; discoverFeeds: typeof discoverFeeds; run: typeof runReader; connect: typeof connection; organize: typeof runOrganizer };
+const defaults: Dependencies = { fetchArticleText: loadArticleText, fetchFeed: loadFeed, discoverFeeds, run: runReader, connect: connection, organize: runOrganizer };
 
 const organizeResponseSchema = z.object({
   moves: z.array(z.object({ feedId: z.string(), folder: z.string() })).max(500).optional(),
@@ -33,6 +33,8 @@ export class Engine {
   private autoRefreshTimer: ReturnType<typeof setInterval> | undefined;
   private refreshJob: Promise<void> | undefined;
   private markReadUndoIds: string[] = [];
+  private feedDiscovery: { url: string; candidates: { url: string; title: string }[] } | null = null;
+  private feedDiscoveryToken = 0;
   private listeners = new Set<(update: Update) => void>();
   private jobs = new Map<string, { controller: AbortController; done: Promise<void> }>();
 
@@ -65,13 +67,22 @@ export class Engine {
       .finally(() => { this.refreshJob = undefined; });
   }
 
-  get snapshot(): Snapshot { return { state: this.store.state, connections: this.connections, refreshing: this.refreshing, opmlImport: this.opmlImport, opmlPreview: this.opmlPreview, organize: this.organize, cliInstall: this.cliInstall, markReadUndo: this.markReadUndoIds.length ? { count: this.markReadUndoIds.length } : null }; }
+  get snapshot(): Snapshot { return { state: this.store.state, connections: this.connections, refreshing: this.refreshing, opmlImport: this.opmlImport, opmlPreview: this.opmlPreview, organize: this.organize, cliInstall: this.cliInstall, markReadUndo: this.markReadUndoIds.length ? { count: this.markReadUndoIds.length } : null, feedDiscovery: this.feedDiscovery }; }
 
   subscribe(listener: (update: Update) => void) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private emit(update: Update) { for (const listener of this.listeners) listener(update); }
   private changed() { this.emit({ type: "snapshot", snapshot: this.snapshot }); }
 
   private t(key: MessageKey, params?: Record<string, string | number>) { return t(this.store.state.language, key, params); }
+
+  private async discoverFeed(raw: string) {
+    const token = ++this.feedDiscoveryToken;
+    const url = publicUrl(raw, this.store.state.language).href;
+    const candidates = await this.dependencies.discoverFeeds(url, undefined, this.store.state.language);
+    if (token !== this.feedDiscoveryToken) return;
+    this.feedDiscovery = { url, candidates };
+    this.changed();
+  }
 
   private async installCli() {
     this.cliInstall = await installCli();
@@ -101,8 +112,12 @@ export class Engine {
         if (existing) throw new Error(this.t("err.feedExists"));
         const result = await this.dependencies.fetchFeed(url, this.store.folder(action.folderId), undefined, this.store.state.language);
         this.store.mergeFeed({ ...result.feed, etag: result.etag, lastModified: result.lastModified }, result.articles);
+        this.feedDiscoveryToken++;
+        this.feedDiscovery = null;
         break;
       }
+      case "feed.discover": return this.discoverFeed(action.url);
+      case "feed.discoverClear": this.feedDiscoveryToken++; this.feedDiscovery = null; this.changed(); return;
       case "feed.remove":
       case "feed.restore": {
         const feed = this.store.state.feeds.find((item) => item.id === action.id);

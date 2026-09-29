@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { cleanArticle, decodeBody, parseFeed, plainText } from "../src/main/feeds";
+import { cleanArticle, decodeBody, feedLinks, parseFeed, plainText } from "../src/main/feeds";
 import { isPublicAddress, publicUrl } from "../src/main/network";
 
 describe("feed ingestion", () => {
@@ -47,6 +47,30 @@ describe("feed ingestion", () => {
     const title = Buffer.from([0x83, 0x65, 0x83, 0x58, 0x83, 0x67]); // テスト in Shift_JIS
     expect(decodeBody(Buffer.concat([header, title, footer]), "application/rss+xml")).toContain("<title>テスト</title>");
     expect(decodeBody(Buffer.from('<rss version="2.0"><channel><title>plain</title></channel></rss>'), "text/xml")).toContain("plain");
+  });
+
+  test("discovers feed links on an HTML page", () => {
+    const html = `<!doctype html><html><head>
+      <link rel="alternate" type="application/rss+xml" title="Main feed" href="/feed.xml">
+      <link rel="alternate" type="application/atom+xml" href="https://cdn.example.com/atom">
+      <link rel="alternate" type="application/rss+xml" href="/feed.xml">
+      <link rel="stylesheet" href="/style.css">
+      <link rel="alternate" type="application/rss+xml" href="http://127.0.0.1/feed">
+      <link rel="alternate" type="text/css" href="/theme.css">
+    </head></html>`;
+    expect(feedLinks(html, "https://example.com/blog/post")).toEqual([
+      { url: "https://example.com/feed.xml", title: "Main feed" },
+      { url: "https://cdn.example.com/atom", title: "" },
+    ]);
+    expect(feedLinks("<html><body>none</body></html>", "https://example.com")).toEqual([]);
+  });
+  test("resolves candidates against a base element and skips unparseable feed types", () => {
+    const html = `<!doctype html><html><head>
+      <base href="https://example.com/">
+      <link rel="alternate" type="application/rss+xml" href="feed.xml">
+      <link rel="alternate" type="application/feed+json" href="feed.json">
+    </head></html>`;
+    expect(feedLinks(html, "https://example.com/blog/")).toEqual([{ url: "https://example.com/feed.xml", title: "" }]);
   });
 });
 

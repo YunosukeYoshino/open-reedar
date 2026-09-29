@@ -273,6 +273,9 @@ button.next-cue { cursor: pointer; }
 .opml-preview > p { margin: 0 0 10px; }
 .opml-preview h3 { font-size: 13px; font-weight: 500; margin: 0 0 9px; }
 .opml-preview-list { list-style: none; padding: 0; margin: 12px 0; max-height: 240px; overflow-y: auto; }
+.discovery-list { list-style: none; padding: 0; margin: 10px 0 0; max-height: 160px; overflow-y: auto; }
+.discovery-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--border); }
+.discovery-title { font-size: 12px; color: var(--secondary); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .opml-preview-list li { padding: 6px 0; border-bottom: 1px solid var(--border); }
 .opml-preview-list label { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
 .opml-preview-list input[type="checkbox"] { width: auto; margin-top: 2px; accent-color: var(--accent); flex-shrink: 0; }

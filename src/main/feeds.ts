@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { decode } from "html-entities";
+import { DOMParser } from "linkedom";
 import Parser from "rss-parser";
 import sanitizeHtml from "sanitize-html";
 import { z } from "zod";
@@ -85,6 +86,35 @@ export function decodeBody(body: Buffer, contentType: string) {
     ?? "utf-8";
   try { return new TextDecoder(label).decode(body); }
   catch { return body.toString("utf8"); }
+}
+
+export type FeedCandidate = { url: string; title: string };
+
+// JSON Feed is intentionally absent: parseFeed only understands XML.
+const feedTypes = new Set(["application/rss+xml", "application/atom+xml", "application/rdf+xml", "application/xml", "text/xml"]);
+
+export function feedLinks(html: string, base: string): FeedCandidate[] {
+  const document = new DOMParser().parseFromString(html, "text/html");
+  let root = base;
+  const baseHref = document.querySelector("base[href]")?.getAttribute("href")?.trim();
+  if (baseHref) { try { root = new URL(baseHref, base).href; } catch { /* an invalid base keeps the page URL */ } }
+  const seen = new Set<string>();
+  const candidates: FeedCandidate[] = [];
+  for (const link of document.querySelectorAll('link[rel~="alternate"]')) {
+    const type = link.getAttribute("type")?.toLowerCase().trim() ?? "";
+    const href = link.getAttribute("href")?.trim();
+    if (!href || !feedTypes.has(type)) continue;
+    try {
+      const url = publicUrl(new URL(href, root).href).href;
+      if (!seen.has(url)) { seen.add(url); candidates.push({ url, title: link.getAttribute("title")?.trim() ?? "" }); }
+    } catch { /* private or invalid candidate */ }
+  }
+  return candidates;
+}
+
+export async function discoverFeeds(url: string, signal?: AbortSignal, lang: Language = "en"): Promise<FeedCandidate[]> {
+  const result = await fetchPublic(url, 0, signal, lang);
+  return feedLinks(decodeBody(result.body, result.contentType), result.url);
 }
 
 export type FeedResult = { feed: Feed; articles: Article[]; etag?: string; lastModified?: string; notModified?: boolean };
