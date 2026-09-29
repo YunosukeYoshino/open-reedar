@@ -32,6 +32,7 @@ export class Engine {
   private organizeRun: { controller: AbortController; done: Promise<void> } | undefined;
   private autoRefreshTimer: ReturnType<typeof setInterval> | undefined;
   private refreshJob: Promise<void> | undefined;
+  private markReadUndoIds: string[] = [];
   private listeners = new Set<(update: Update) => void>();
   private jobs = new Map<string, { controller: AbortController; done: Promise<void> }>();
 
@@ -64,7 +65,7 @@ export class Engine {
       .finally(() => { this.refreshJob = undefined; });
   }
 
-  get snapshot(): Snapshot { return { state: this.store.state, connections: this.connections, refreshing: this.refreshing, opmlImport: this.opmlImport, opmlPreview: this.opmlPreview, organize: this.organize, cliInstall: this.cliInstall }; }
+  get snapshot(): Snapshot { return { state: this.store.state, connections: this.connections, refreshing: this.refreshing, opmlImport: this.opmlImport, opmlPreview: this.opmlPreview, organize: this.organize, cliInstall: this.cliInstall, markReadUndo: this.markReadUndoIds.length ? { count: this.markReadUndoIds.length } : null }; }
 
   subscribe(listener: (update: Update) => void) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private emit(update: Update) { for (const listener of this.listeners) listener(update); }
@@ -128,6 +129,18 @@ export class Engine {
       case "folder.save": this.store.saveFolder(action.id, action.name); break;
       case "folder.remove": this.store.removeFolder(action.id); break;
       case "article.read": this.store.article(action.id).read = action.read; break;
+      case "articles.markRead": {
+        const ids = action.scope.type === "feed" ? new Set([action.scope.id]) : new Set(this.store.state.feeds.filter((feed) => feed.folderId === action.scope.id).map((feed) => feed.id));
+        this.markReadUndoIds = [];
+        for (const article of this.store.state.articles) if (ids.has(article.feedId) && !article.read) { article.read = true; this.markReadUndoIds.push(article.id); }
+        break;
+      }
+      case "articles.markReadUndo": {
+        const ids = new Set(this.markReadUndoIds);
+        for (const article of this.store.state.articles) if (ids.has(article.id)) article.read = false;
+        this.markReadUndoIds = [];
+        break;
+      }
       case "article.fetchText": return this.fetchArticleText(action.id);
       case "article.star": this.store.article(action.id).starred = action.starred; break;
       case "app.setLanguage": this.store.state.language = action.language; void this.refreshConnections(); break;

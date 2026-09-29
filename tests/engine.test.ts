@@ -407,4 +407,23 @@ describe("reading workflow", () => {
     expect((await Store.open(path)).state.refreshMinutes).toBe(45);
     await engine.close();
   });
+
+  test("bulk mark-read with undo restores only the flipped articles", async () => {
+    const { engine, store, article } = await setup("mark-read", async () => {});
+    store.saveFolder(null, "Folder");
+    const folder = store.state.folders[0]!;
+    store.state.feeds[0]!.folderId = folder.id;
+    article.read = true;
+    const unread = await parseFeed(xml.replaceAll("article", "second"), "https://example.com/rss", null);
+    store.state.articles.push(...unread.articles);
+    expect(store.state.articles.filter((item) => !item.read)).toHaveLength(1);
+    await engine.dispatch({ type: "articles.markRead", scope: { type: "folder", id: folder.id } });
+    expect(store.state.articles.every((item) => item.read)).toBe(true);
+    expect(engine.snapshot.markReadUndo).toEqual({ count: 1 });
+    await engine.dispatch({ type: "articles.markReadUndo" });
+    expect(store.state.articles.filter((item) => !item.read)).toHaveLength(1);
+    expect(store.state.articles[0]?.read).toBe(true);
+    expect(engine.snapshot.markReadUndo).toBeNull();
+    await engine.close();
+  });
 });
