@@ -8,7 +8,7 @@ Reedar is a desktop RSS reader for macOS, inspired by the familiar three-pane re
 
 Bring your own CLI login. Reedar uses the agent's existing service access and usage allowance; it does not require a separate model API key.
 
-> **Early preview for macOS on Apple Silicon.** Codex reading is verified with GPT-5.3-Codex-Spark. Claude Code's successful live reading is unverified, and Antigravity reading is disabled. The interface and reading assistant currently use Japanese.
+> **Early preview for macOS on Apple Silicon.** Codex reading is verified with GPT-6-Luna. Claude Code's successful live reading is unverified, and Antigravity reading is disabled. The interface and reading assistant currently use Japanese.
 >
 > **Download limitations:** the DMG / ZIP previews use ad-hoc signing and are **not notarized**. macOS may block a downloaded app. Installation on another Mac and Intel execution have not been verified. See [Distribution](docs/distribution.md) before installing a build.
 
@@ -87,7 +87,7 @@ External OPML inclusions are not followed. DTDs, entities, malformed XML, and pr
 
 | Agent | Status | Reading model / behavior |
 | --- | --- | --- |
-| **Codex** | Verified with a real account | GPT-5.3-Codex-Spark, pinned explicitly; Japanese summaries and follow-up questions verified in the Mac app |
+| **Codex** | Verified with a real account | GPT-6-Luna, pinned explicitly; Japanese summaries and follow-up questions verified in the Mac app |
 | **Claude Code** | Adapter implemented; live verification pending | Authentication-waiting behavior verified; successful live reading has not been validated |
 | **Antigravity** | CLI detection only | Shown as integration pending; article submission is disabled until per-session tool restrictions can be enforced |
 
@@ -99,7 +99,7 @@ codex login
 claude auth login
 ```
 
-Codex requires a ChatGPT login and access to `gpt-5.3-codex-spark`. Reedar checks the model returned by the CLI and stops if it differs; it does not silently substitute another model. Claude Code is intended to use an existing subscription login. Requests consume the connected service's usage allowance.
+Codex requires a ChatGPT login and access to `gpt-6-luna`. Reedar checks the model returned by the CLI and stops if it differs; it does not silently substitute another model. Claude Code is intended to use an existing subscription login. Requests consume the connected service's usage allowance.
 
 Reedar prefers the Codex CLI bundled with OpenAI’s Codex desktop app, then checks `PATH` and common install locations. You can specify an executable with `REEDAR_CODEX_BIN`, `REEDAR_CLAUDE_BIN`, or `REEDAR_ANTIGRAVITY_BIN`. The Antigravity override affects detection only. Reedar does not rewrite your existing CLI settings.
 

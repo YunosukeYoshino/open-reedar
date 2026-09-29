@@ -4,7 +4,7 @@ Reedar can be packaged as a `.app`, a drag-to-Applications DMG, and a ZIP archiv
 
 The current configuration produces **ad-hoc-signed, unnotarized preview builds**. These are not Developer ID releases. macOS may block a downloaded preview, and a successful launch on the build machine does not establish Gatekeeper approval on another Mac.
 
-The verified preview scope is **macOS on Apple Silicon with Codex / GPT-5.3-Codex-Spark**. Successful Claude Code reading, Antigravity reading, Intel execution, and installation on another Mac are not verified; Antigravity article submission remains disabled. Include this scope and the signing limitations in every preview's release notes.
+The verified preview scope is **macOS on Apple Silicon with Codex / GPT-6-Luna**. Successful Claude Code reading, Antigravity reading, Intel execution, and installation on another Mac are not verified; Antigravity article submission remains disabled. Include this scope and the signing limitations in every preview's release notes.
 
 ## Build locally
 

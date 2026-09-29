@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const agentSchema = z.enum(["claude", "codex", "antigravity"]);
 export type Agent = z.infer<typeof agentSchema>;
-export const codexModel = "gpt-5.3-codex-spark";
+export const codexModel = "gpt-6-luna";
 
 export const folderSchema = z.object({ id: z.string(), name: z.string() });
 export const feedSchema = z.object({

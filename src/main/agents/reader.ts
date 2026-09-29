@@ -162,7 +162,7 @@ export async function runCodex(path: string, prompt: string, cwd: string, signal
       cwd, model: codexModel, ephemeral: true, approvalPolicy: "on-request", sandbox: "read-only", baseInstructions: session.instructions,
       developerInstructions: session.developer,
     }));
-    if (started.model !== codexModel) throw new Error("指定したモデル GPT-5.3-Codex-Spark を利用できません。別のモデルでは実行しません。");
+    if (started.model !== codexModel) throw new Error("指定したモデル GPT-6-Luna を利用できません。別のモデルでは実行しません。");
     await new Promise<void>((resolve, reject) => {
       let text = "";
       const timer = setTimeout(() => reject(new Error("timeout")), 180_000);

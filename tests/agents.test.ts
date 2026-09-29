@@ -64,11 +64,11 @@ describe("agent protocol", () => {
         if(m.method==="initialize") send({id:m.id,result:{}});
         if(m.method==="account/read") send({id:m.id,result:{account:{type:"chatgpt"}}});
         if(m.method==="thread/start") {
-          if(m.params.model!=="gpt-5.3-codex-spark") return send({id:m.id,error:{message:"Use the requested Spark model"}});
+          if(m.params.model!=="gpt-6-luna") return send({id:m.id,error:{message:"Use the requested model"}});
           send({id:m.id,result:{thread:{id:"t"},model:m.params.model}});
         }
         if(m.method==="turn/start") {
-          if(m.params.model!=="gpt-5.3-codex-spark" || m.params.effort!=="medium") return send({id:m.id,error:{message:"Pin Spark and a supported reasoning effort on each turn"}});
+          if(m.params.model!=="gpt-6-luna" || m.params.effort!=="medium") return send({id:m.id,error:{message:"Pin Pin the model and a supported reasoning effort on each turn"}});
           if("access" in m.params.sandboxPolicy) return send({id:m.id,error:{message:"readOnly.access is no longer supported"}});
           if(m.params.sandboxPolicy.type!=="readOnly" || m.params.sandboxPolicy.networkAccess!==false) return send({id:m.id,error:{message:"Reading must be isolated from writes and network"}});
           send({id:m.id,result:{turn:{id:"turn"}}});

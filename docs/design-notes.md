@@ -42,7 +42,7 @@ flowchart LR
   H --> Q
 ```
 
-The preview supports direct RSS / Atom registration, folders, unread state, stars, local search, and conversations about one article at a time. Codex and Claude Code have reading adapters; Codex uses GPT-5.3-Codex-Spark. Antigravity is a detected integration target with reading disabled pending tool isolation.
+The preview supports direct RSS / Atom registration, folders, unread state, stars, local search, and conversations about one article at a time. Codex and Claude Code have reading adapters; Codex uses GPT-6-Luna. Antigravity is a detected integration target with reading disabled pending tool isolation.
 
 The initial research also considered multi-article comparisons, translation shortcuts, scheduled digests, and handing an article to an implementation task. Those are ideas, not commitments or implemented features. Inoreader and other subscription-service sync were excluded from the initial scope to avoid requiring an additional service dependency.
 

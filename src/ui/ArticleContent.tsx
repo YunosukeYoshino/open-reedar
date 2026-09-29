@@ -22,7 +22,7 @@ export function ArticleContent({ article, agent, conversation, act, perform }: P
     finally { setSending(false); }
   }
   return <>
-    <div className="summary-toolbar"><button className="summary-toggle" aria-label={showSummary ? "フィード本文に戻る" : "記事を要約"} aria-pressed={showSummary} disabled={!showSummary && !summary && busy} onClick={() => { if (showSummary || summary) setShowSummary(!showSummary); else void summarize(); }}><FileText size={15} />{showSummary ? "フィード本文に戻る" : summary ? "要約を読む" : "要約する"}</button><span>{agent === "codex" ? "Codex · Spark" : agentName[agent]}{!summary ? "に記事本文を送信" : ""}</span></div>
+    <div className="summary-toolbar"><button className="summary-toggle" aria-label={showSummary ? "フィード本文に戻る" : "記事を要約"} aria-pressed={showSummary} disabled={!showSummary && !summary && busy} onClick={() => { if (showSummary || summary) setShowSummary(!showSummary); else void summarize(); }}><FileText size={15} />{showSummary ? "フィード本文に戻る" : summary ? "要約を読む" : "要約する"}</button><span>{agent === "codex" ? "Codex · Luna" : agentName[agent]}{!summary ? "に記事本文を送信" : ""}</span></div>
     {showSummary ? <section className="reader-summary" aria-label="記事の要約">
       <div className="summary-heading"><h2>要約</h2>{summary?.role === "assistant" ? <RunStatus state={summary.state} /> : null}<button className="text-button" disabled={busy} onClick={() => void summarize()}>再要約</button></div>
       {error ? <p className="form-error" role="alert">{error}</p> : null}
