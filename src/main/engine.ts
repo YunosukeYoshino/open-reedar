@@ -31,6 +31,7 @@ export class Engine {
   private importJob: { controller: AbortController; done: Promise<void> } | undefined;
   private organizeRun: { controller: AbortController; done: Promise<void> } | undefined;
   private autoRefreshTimer: ReturnType<typeof setInterval> | undefined;
+  private refreshJob: Promise<void> | undefined;
   private listeners = new Set<(update: Update) => void>();
   private jobs = new Map<string, { controller: AbortController; done: Promise<void> }>();
 
@@ -51,9 +52,16 @@ export class Engine {
     this.autoRefreshTimer = undefined;
     const minutes = this.store.state.refreshMinutes;
     if (minutes > 0) {
-      this.autoRefreshTimer = setInterval(() => { void this.refreshFeeds(true); }, minutes * 60_000);
+      this.autoRefreshTimer = setInterval(() => { this.queueAutoRefresh(); }, minutes * 60_000);
       this.autoRefreshTimer.unref();
     }
+  }
+
+  private queueAutoRefresh() {
+    if (this.refreshJob) return;
+    this.refreshJob = this.refreshFeeds(true)
+      .catch((error: unknown) => { console.error("reedar: automatic refresh failed", error); })
+      .finally(() => { this.refreshJob = undefined; });
   }
 
   get snapshot(): Snapshot { return { state: this.store.state, connections: this.connections, refreshing: this.refreshing, opmlImport: this.opmlImport, opmlPreview: this.opmlPreview, organize: this.organize, cliInstall: this.cliInstall }; }
@@ -137,7 +145,10 @@ export class Engine {
         this.changed();
         return;
       }
-      case "refresh": return this.refreshFeeds(action.automatic === true);
+      case "refresh": {
+        this.refreshJob ??= this.refreshFeeds(action.automatic === true).finally(() => { this.refreshJob = undefined; });
+        return this.refreshJob;
+      }
       case "connections.refresh": return this.refreshConnections();
       case "cli.install": return this.installCli();
       case "chat.send": return this.send(action.articleId, action.agent, action.text);
@@ -227,7 +238,7 @@ export class Engine {
                 if (!folder) { this.store.saveFolder(null, entry.folderName); folder = this.store.state.folders.find((folder) => folder.name === entry.folderName); }
                 folderId = folder?.id ?? null;
               }
-              this.store.mergeFeed({ ...result.feed, title: entry.title || result.feed.title, folderId, removedAt: undefined }, result.articles);
+              this.store.mergeFeed({ ...result.feed, title: entry.title || result.feed.title, folderId, removedAt: undefined, etag: result.etag ?? result.feed.etag, lastModified: result.lastModified ?? result.feed.lastModified }, result.articles);
               await this.store.save();
               report.results.push({ ...item, status: "imported", detail: existing ? this.t("err.restored") : this.t("err.imported") });
             } catch {
@@ -366,6 +377,8 @@ export class Engine {
               merged.updatedAt = new Date().toISOString();
               merged.error = null;
               merged.failures = 0;
+              merged.etag = result.etag ?? merged.etag;
+              merged.lastModified = result.lastModified ?? merged.lastModified;
               delete merged.backoffUntil;
               return;
             }
@@ -472,6 +485,7 @@ export class Engine {
   async close() {
     if (this.autoRefreshTimer) clearInterval(this.autoRefreshTimer);
     this.autoRefreshTimer = undefined;
+    await this.refreshJob?.catch(() => {});
     this.importJob?.controller.abort();
     this.organizeRun?.controller.abort();
     for (const job of this.jobs.values()) job.controller.abort();

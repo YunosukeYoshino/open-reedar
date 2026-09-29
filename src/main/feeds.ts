@@ -94,7 +94,7 @@ export async function loadFeed(url: string, folderId: string | null, signal?: Ab
   if (cache?.etag) headers["If-None-Match"] = cache.etag;
   if (cache?.lastModified) headers["If-Modified-Since"] = cache.lastModified;
   const result = await fetchPublic(url, 0, signal, lang, headers);
-  if (result.notModified) return { feed: { id: hash(url), url, title: "", siteUrl: "", folderId, updatedAt: null, error: null }, articles: [] as Article[], notModified: true };
+  if (result.notModified) return { feed: { id: hash(url), url, title: "", siteUrl: "", folderId, updatedAt: null, error: null }, articles: [] as Article[], notModified: true, etag: result.etag, lastModified: result.lastModified };
   const xml = decodeBody(result.body, result.contentType);
   try {
     const parsed = await parseFeed(xml, url, folderId, undefined, lang);

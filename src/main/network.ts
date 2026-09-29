@@ -61,7 +61,7 @@ export async function fetchPublic(value: string, redirects = 0, signal?: AbortSi
       }
       if (response.statusCode === 304) {
         response.resume();
-        resolve({ body: Buffer.alloc(0), url: url.href, contentType: "", notModified: true });
+        resolve({ body: Buffer.alloc(0), url: url.href, contentType: "", notModified: true, etag: response.headers.etag, lastModified: response.headers["last-modified"] });
         return;
       }
       if (!response.statusCode || response.statusCode < 200 || response.statusCode >= 300) {
