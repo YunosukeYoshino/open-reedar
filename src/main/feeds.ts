@@ -51,7 +51,10 @@ export function cleanArticle(html: string, base: string) {
   return { html: clean, text: plainText(clean), imageUrl };
 }
 
+const notAFeedMessage = "RSS/Atomとして読み込めませんでした。WebサイトではなくフィードのURLを入力してください。";
+
 export async function parseFeed(xml: string, url: string, folderId: string | null, now = new Date().toISOString()) {
+  if (/^\s*(<!doctype\s+html|<html[\s>])/i.test(xml)) throw new Error(notAFeedMessage);
   if (/<!DOCTYPE|<!ENTITY/i.test(xml)) throw new Error("外部エンティティを含むXMLには対応していません。");
   const parsed = parsedFeedSchema.parse(await parser.parseString(xml));
   const feedId = hash(url);
@@ -73,11 +76,20 @@ export async function parseFeed(xml: string, url: string, folderId: string | nul
   return { feed, articles };
 }
 
+export function decodeBody(body: Buffer, contentType: string) {
+  const label = /charset=["']?([^;\s"']+)/i.exec(contentType)?.[1]
+    ?? /<\?xml[^?]*encoding=["']?([^\s"'?>]+)/i.exec(body.subarray(0, 512).toString("latin1"))?.[1]
+    ?? "utf-8";
+  try { return new TextDecoder(label).decode(body); }
+  catch { return body.toString("utf8"); }
+}
+
 export async function loadFeed(url: string, folderId: string | null, signal?: AbortSignal) {
   const result = await fetchPublic(url, 0, signal);
-  try { return await parseFeed(result.body.toString("utf8"), url, folderId); }
+  const xml = decodeBody(result.body, result.contentType);
+  try { return await parseFeed(xml, url, folderId); }
   catch (error) {
-    if (error instanceof Error && error.message.includes("外部エンティティ")) throw error;
-    throw new Error("RSS/Atomとして読み込めませんでした。WebサイトではなくフィードのURLを入力してください。", { cause: error });
+    if (error instanceof Error && (error.message === notAFeedMessage || error.message.includes("外部エンティティ"))) throw error;
+    throw new Error(notAFeedMessage, { cause: error });
   }
 }
