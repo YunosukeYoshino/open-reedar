@@ -34,7 +34,7 @@ release/
 
 The DMG includes an Applications shortcut. The ZIP contains the same application bundle. After installation, the app stores its library under `~/Library/Application Support/Reedar/`; it does not store articles inside the application bundle.
 
-Use `bun run dist:mac --x64` to request an Intel build. Intel execution is not currently validated. Without an architecture flag, electron-builder uses the build machine's architecture. Generated bundles and archives are ignored by Git.
+Use `bun run dist:mac --x64` to request an Intel build or `bun run dist:mac --universal` for a single DMG/ZIP containing both architectures. Intel execution is not currently validated. Without an architecture flag, electron-builder uses the build machine's architecture. Generated bundles and archives are ignored by Git.
 
 To verify downloaded archives, place them beside `SHA256SUMS.txt` and run:
 
@@ -50,7 +50,7 @@ The [Build macOS preview workflow](../.github/workflows/build-macos.yml) runs on
 
 1. Put the repository on GitHub and enable Actions.
 2. Open **Actions → Build macOS preview → Run workflow**.
-3. Choose `arm64` or `x64` and the source ref. Leave `sign_and_notarize` off for an ad-hoc preview; enable it only after configuring the signing secrets below.
+3. Choose `arm64`, `x64`, or `universal` and the source ref. Leave `sign_and_notarize` off for an ad-hoc preview; enable it only after configuring the signing secrets below.
 4. Download the artifact containing the DMG, ZIP, block maps, update metadata, and checksum manifest.
 
 The workflow pins action revisions, runs the automated checks, and packages on a macOS runner. Its repository token has read-only contents permission; it does not create a tag, push code, or publish a release. Workflow artifacts expire after 14 days.
@@ -63,7 +63,7 @@ The public repository is [YunosukeYoshino/reedar](https://github.com/YunosukeYos
 
 For a normal publicly distributed macOS release, prepare a **Developer ID Application** certificate and Apple notarization credentials. An Apple Development certificate is not a substitute for this distribution identity.
 
-The default `electron-builder.json` deliberately uses an ad-hoc identity. The optional `electron-builder.signed.cjs` profile removes that override, requires signing, enables Hardened Runtime, and requests notarization. Build it with `bun run dist:mac:signed --arm64`. Signing must fail if the required identity is unavailable.
+The default `electron-builder.json` deliberately uses an ad-hoc identity and `-preview` artifact names. The optional `electron-builder.signed.cjs` profile removes that override, requires signing, enables Hardened Runtime with the entitlements in `build/entitlements.mac.plist` (the standard Electron JIT / unsigned-executable-memory set; the app is not sandboxed, so spawning agent CLIs stays possible), requests notarization, and drops the `-preview` marker from artifact names. Build it with `bun run dist:mac:signed --arm64` (or `--universal`). Signing must fail if the required identity is unavailable.
 
 For the workflow’s `sign_and_notarize` option, configure these repository secrets:
 
@@ -78,10 +78,10 @@ For the workflow’s `sign_and_notarize` option, configure these repository secr
 The workflow maps the certificate secrets to electron-builder’s `CSC_LINK` / `CSC_KEY_PASSWORD`; the local command can use those environment variables or a certificate already in the keychain. Local notarization uses the same `APPLE_*` variables. No credentials are bundled in the app. Before a Developer ID release:
 
 - Select the Developer ID Application signing identity and require successful code signing.
-- Enable Hardened Runtime and the Electron entitlements required by the selected runtime version.
+- Enable Hardened Runtime and the Electron entitlements required by the selected runtime version. The signed profile already applies `build/entitlements.mac.plist`.
 - Enable notarization and supply credentials through a secure environment or keychain profile.
-- Verify the resulting signature, notarization/stapling, and Gatekeeper assessment, then test the downloaded app on another Mac.
-- Replace the preview artifact naming only after those release checks pass.
+- Verify the resulting signature, notarization/stapling, and Gatekeeper assessment, then test the downloaded app on another Mac. The workflow's signed path runs `codesign --verify` and `xcrun stapler validate` after packaging.
+- Signed builds already use release artifact names; keep `-preview` names only on ad-hoc output.
 
 Do not store certificates, passwords, or API keys in the repository or upload them as build artifacts. Refer to the [electron-builder macOS guide](https://www.electron.build/docs/mac/) for the current signing and notarization options. The signed pipeline and automatic updater are implemented, but a successful signed/notarized build and live app replacement remain unverified.
 

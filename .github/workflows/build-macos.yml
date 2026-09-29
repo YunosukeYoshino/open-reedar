@@ -4,13 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       architecture:
-        description: Target Mac architecture (live validation currently covers arm64)
+        description: Target Mac architecture (universal produces one DMG/ZIP for both)
         type: choice
         required: true
         default: arm64
         options:
           - arm64
           - x64
+          - universal
       sign_and_notarize:
         description: Require Developer ID signing and Apple notarization (repository secrets required)
         type: boolean
@@ -43,7 +44,7 @@ jobs:
         if: ${{ !inputs.sign_and_notarize }}
         run: |
           case "$BUILD_ARCH" in
-            arm64|x64) bun run dist:mac --"$BUILD_ARCH" ;;
+            arm64|x64|universal) bun run dist:mac --"$BUILD_ARCH" ;;
             *) echo "Unsupported architecture" >&2; exit 1 ;;
           esac
       - name: Package signed update
@@ -57,7 +58,7 @@ jobs:
         run: |
           bun -e 'const required = ["CSC_LINK", "CSC_KEY_PASSWORD", "APPLE_ID", "APPLE_APP_SPECIFIC_PASSWORD", "APPLE_TEAM_ID"]; const missing = required.filter((name) => !process.env[name]); if (missing.length) { console.error("Missing signing configuration: " + missing.join(", ")); process.exit(1); }'
           case "$BUILD_ARCH" in
-            arm64|x64) bun run dist:mac:signed --"$BUILD_ARCH" ;;
+            arm64|x64|universal) bun run dist:mac:signed --"$BUILD_ARCH" ;;
             *) echo "Unsupported architecture" >&2; exit 1 ;;
           esac
           APP_DIRECTORY=mac
@@ -71,7 +72,7 @@ jobs:
       - name: Upload preview artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: Reedar-mac-${{ inputs.architecture }}-preview
+          name: Reedar-mac-${{ inputs.architecture }}-${{ inputs.sign_and_notarize && 'signed' || 'preview' }}
           path: |
             release/*.dmg
             release/*.zip
