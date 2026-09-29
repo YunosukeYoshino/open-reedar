@@ -450,8 +450,8 @@ export class Engine {
   private runDigest(articleIds: string[], agent: Agent) {
     if (this.digestJob) throw new Error(this.t("err.digestRunning"));
     const picked = articleIds.map((id) => this.store.state.articles.find((article) => article.id === id)).filter((article) => article !== undefined);
-    // ponytail: articles share a 150k-char text budget so the JSON prompt stays under the 180k run() cap; upgrade path is chunking with a map pass.
-    const perArticle = Math.min(15_000, Math.floor(150_000 / Math.max(picked.length, 1)));
+    // ponytail: articles share a text budget sized to the agent so the JSON prompt stays under its cap and every selected article is included; upgrade path is chunking with a map pass.
+    const perArticle = Math.min(15_000, Math.floor((agent === "apple" ? 20_000 : 150_000) / Math.max(picked.length, 1)));
     const source = picked.map((article) => `## ${article.title}\n${article.url}\n\n${(article.readerText ?? article.text).slice(0, perArticle)}`).join("\n\n");
     if (picked.filter((article) => (article.readerText ?? article.text).trim()).length < 2) {
       this.digest = { status: "failed", agent, text: "", titles: picked.map((article) => article.title), detail: this.t("err.digestEmpty") };

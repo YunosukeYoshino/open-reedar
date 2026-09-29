@@ -97,9 +97,14 @@ export async function runReader(agent: Agent, conversation: Conversation, questi
   if (signal.aborted) throw new LocalizedError(t(lang, "err.aborted"));
   const path = await executable(agent);
   if (agent === "apple") {
-    const fmPrompt = prompt.length <= fmPromptLimit ? prompt
-      : readerPrompt({ ...conversation, source: { ...conversation.source, text: conversation.source.text.slice(0, 24_000) } }, question, lang);
-    if (fmPrompt.length > fmPromptLimit) throw new LocalizedError(t(lang, "err.tooLong"));
+    const header = `${sessionProfile("reader", lang).instructions}\n\n`;
+    let fmPrompt = header + prompt;
+    if (fmPrompt.length > fmPromptLimit) {
+      const fit = conversation.source.text.length - (fmPrompt.length - fmPromptLimit);
+      if (fit <= 0) throw new LocalizedError(t(lang, "err.tooLong"));
+      fmPrompt = header + readerPrompt({ ...conversation, source: { ...conversation.source, text: conversation.source.text.slice(0, fit) } }, question, lang);
+      if (fmPrompt.length > fmPromptLimit) throw new LocalizedError(t(lang, "err.tooLong"));
+    }
     return runFm(path, fmPrompt, cwd, signal, emit, lang);
   }
   if (agent === "claude") return runClaude(path, prompt, cwd, signal, emit, "reader", lang);
@@ -112,8 +117,9 @@ export async function runOrganizer(agent: Agent, prompt: string, cwd: string, si
   if (signal.aborted) throw new LocalizedError(t(lang, "err.aborted"));
   const path = await executable(agent);
   if (agent === "apple") {
-    if (prompt.length > fmPromptLimit) throw new LocalizedError(t(lang, "err.organizeTooLarge"));
-    return runFm(path, prompt, cwd, signal, emit, lang);
+    const fmPrompt = `${sessionProfile("organizer", lang).instructions}\n\n${prompt}`;
+    if (fmPrompt.length > fmPromptLimit) throw new LocalizedError(t(lang, "err.organizeTooLarge"));
+    return runFm(path, fmPrompt, cwd, signal, emit, lang);
   }
   if (agent === "claude") return runClaude(path, prompt, cwd, signal, emit, "organizer", lang);
   return runCodex(path, prompt, cwd, signal, emit, undefined, "organizer", lang);
