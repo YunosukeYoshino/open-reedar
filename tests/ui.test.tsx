@@ -206,7 +206,7 @@ test("OPML preview applies only selected feeds and removes missing ones after co
   const apply = [...dialog.querySelectorAll("button")].find((button) => button.textContent?.includes("を読み込む"));
   if (!(apply instanceof window.HTMLButtonElement)) throw new Error("Missing apply button");
   await act(async () => apply.click());
-  expect(actions.at(-1)).toEqual({ type: "opml.import", xml, urls: ["https://a.example.com/rss"] });
+  expect(actions.at(-1)).toEqual({ type: "opml.import", xml, urls: ["https://a.example.com/rss"], folders: { "https://a.example.com/rss": "Tech" } });
   const missingBox = dialog.querySelector(".opml-missing input[type=checkbox]");
   if (!(missingBox instanceof window.HTMLInputElement)) throw new Error("Missing missing-feed checkbox");
   await act(async () => missingBox.click());

@@ -35,7 +35,10 @@ export function OpmlDialog({ report, preview, hasFeeds, act, perform, organize, 
   async function apply() {
     if (!xml || !chosen.length || sending || running) return;
     setSending(true); setError(null);
-    try { await act({ type: "opml.import", xml, urls: chosen.map((entry) => entry.url) }); }
+    try {
+      const folders = Object.fromEntries(chosen.flatMap((entry) => entry.folderName ? [[entry.url, entry.folderName]] : []));
+      await act({ type: "opml.import", xml, urls: chosen.map((entry) => entry.url), ...(Object.keys(folders).length ? { folders } : {}) });
+    }
     catch (error: unknown) { setError(error instanceof Error ? error.message : "読み込めませんでした。"); }
     finally { setSending(false); }
   }

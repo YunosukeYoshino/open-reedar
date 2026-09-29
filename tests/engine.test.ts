@@ -265,7 +265,7 @@ describe("reading workflow", () => {
   });
 
   test("proposes and applies a library organize plan, dropping invalid moves", async () => {
-    const { engine, store } = await setup("organize", async () => {}, false, undefined, async (_agent, prompt, _cwd, _signal, emit) => {
+    const { engine, store, path } = await setup("organize", async () => {}, false, undefined, async (_agent, prompt, _cwd, _signal, emit) => {
       const feeds = JSON.parse(prompt).feeds as { id: string }[];
       emit({ type: "delta", text: `説明\n{"moves":[{"feedId":"${feeds[0]?.id ?? ""}","folder":"Tech"},{"feedId":"missing","folder":"X"},{"feedId":"${feeds[0]?.id ?? ""}","folder":""}]}` });
     });
@@ -279,6 +279,7 @@ describe("reading workflow", () => {
     await engine.dispatch({ type: "organize.apply", moves: job?.plan?.moves ?? [] });
     const folder = store.state.folders.find((item) => item.name === "Tech");
     expect(store.state.feeds[0]?.folderId).toBe(folder?.id);
+    expect((await Store.open(path)).state.feeds[0]?.folderId).toBe(folder?.id);
     expect(engine.snapshot.organize).toBeNull();
     await engine.close();
   });
@@ -296,7 +297,7 @@ describe("reading workflow", () => {
   });
 
   test("applies opml folder assignments to preview entries only", async () => {
-    const { engine } = await setup("organize-opml", async () => {}, false, undefined, async (_agent, _prompt, _cwd, _signal, emit) => {
+    const { engine, store } = await setup("organize-opml", async () => {}, false, undefined, async (_agent, _prompt, _cwd, _signal, emit) => {
       emit({ type: "delta", text: `{"assignments":[{"url":"https://a.example.com/rss","folder":"News"},{"url":"https://unknown.example.com/rss","folder":"X"}]}` });
     });
     const opml = `<opml version="2.0"><body><outline text="A" xmlUrl="https://a.example.com/rss"/><outline text="B" xmlUrl="https://b.example.com/rss"/></body></opml>`;
@@ -310,6 +311,12 @@ describe("reading workflow", () => {
     expect(entry?.folderName).toBe("News");
     expect(entry?.detail).toBe("フォルダ「News」を作成します。");
     expect(engine.snapshot.organize).toBeNull();
+    const folders = Object.fromEntries((engine.snapshot.opmlPreview?.entries ?? []).flatMap((item) => item.folderName ? [[item.url, item.folderName]] : []));
+    await engine.dispatch({ type: "opml.import", xml: opml, urls: ["https://a.example.com/rss"], folders });
+    await engine.settle();
+    expect(engine.snapshot.opmlImport?.results[0]?.status).toBe("imported");
+    const imported = store.state.feeds.find((item) => item.url === "https://a.example.com/rss");
+    expect(imported?.folderId).toBe(store.state.folders.find((item) => item.name === "News")?.id);
     await engine.close();
   });
 

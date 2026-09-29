@@ -92,12 +92,12 @@ export class Engine {
       case "folder.save": this.store.saveFolder(action.id, action.name); break;
       case "article.read": this.store.article(action.id).read = action.read; break;
       case "article.star": this.store.article(action.id).starred = action.starred; break;
-      case "opml.import": return this.importOpml(action.xml, action.urls);
+      case "opml.import": return this.importOpml(action.xml, action.urls, action.folders);
       case "opml.preview": return this.previewOpml(action.xml);
       case "opml.previewClear": this.opmlPreview = null; this.changed(); return;
       case "opml.stop": this.importJob?.controller.abort(); return;
       case "organize.propose": return this.proposeOrganize(action.agent, action.scope);
-      case "organize.apply": return this.applyOrganize(action.moves, action.assignments);
+      case "organize.apply": this.applyOrganize(action.moves, action.assignments); break;
       case "organize.cancel": this.organizeRun?.controller.abort(); this.organize = null; this.changed(); return;
       case "organize.clear": {
         if (this.organizeRun) throw new Error("整理案の生成は実行中です。");
@@ -144,10 +144,11 @@ export class Engine {
     this.changed();
   }
 
-  private async importOpml(xml: string, urls?: string[]) {
+  private async importOpml(xml: string, urls?: string[], folders?: Record<string, string>) {
     if (this.importJob) throw new Error("OPMLの読み込みは実行中です。");
     const selected = urls ? new Set(urls) : null;
-    const entries = (await parseOpml(xml)).filter((entry) => !selected || selected.has(entry.url));
+    const entries = (await parseOpml(xml)).map((entry) => ({ ...entry, folderName: folders?.[entry.url] ?? entry.folderName }))
+      .filter((entry) => !selected || selected.has(entry.url));
     if (this.importJob) throw new Error("OPMLの読み込みは実行中です。");
     const report: OpmlImport = { status: "running", total: entries.length, results: [] };
     this.opmlImport = report;
@@ -238,7 +239,7 @@ export class Engine {
     const feeds = this.store.state.feeds.filter((feed) => !feed.removedAt).map((feed) => ({
       id: feed.id, title: feed.title, url: feed.url,
       folder: this.store.state.folders.find((folder) => folder.id === feed.folderId)?.name ?? null,
-      recent: this.store.state.articles.filter((article) => article.feedId === feed.id).slice(-3).map((article) => article.title),
+      recent: this.store.state.articles.filter((article) => article.feedId === feed.id).slice(0, 3).map((article) => article.title),
     }));
     return JSON.stringify({ task: "フィードをテーマ別のフォルダに整理する案を作成してください。", folders, feeds });
   }
@@ -290,7 +291,6 @@ export class Engine {
         entry.detail = folders.some((f) => f.name === folderName) ? undefined : `フォルダ「${folderName}」を作成します。`;
       }
       this.organize = null;
-      this.changed();
       return;
     }
     for (const item of moves ?? []) {
