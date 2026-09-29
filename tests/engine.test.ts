@@ -335,6 +335,19 @@ describe("reading workflow", () => {
     await engine.close();
   });
 
+  test("removing a folder unassigns its feeds and persists", async () => {
+    const { engine, store, path } = await setup("folder-remove", async () => {});
+    await engine.dispatch({ type: "folder.save", id: null, name: "News" });
+    const folder = store.state.folders.find((item) => item.name === "News");
+    await engine.dispatch({ type: "feed.move", id: store.state.feeds[0]?.id ?? "", folderId: folder?.id ?? null });
+    await engine.dispatch({ type: "folder.remove", id: folder?.id ?? "" });
+    expect(store.state.folders).toHaveLength(0);
+    expect(store.state.feeds[0]?.folderId).toBeNull();
+    expect((await Store.open(path)).state.feeds[0]?.folderId).toBeNull();
+    await expect(engine.dispatch({ type: "folder.remove", id: folder?.id ?? "" })).rejects.toThrow("フォルダが見つかりません。");
+    await engine.close();
+  });
+
   test("refresh failure preserves cached articles and reports the feed error", async () => {
     const { engine, store } = await setup("refresh", async () => {}, true);
     await engine.dispatch({ type: "refresh" });

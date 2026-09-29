@@ -71,6 +71,14 @@ export class Store {
     }
   }
 
+  removeFolder(id: string) {
+    if (!this.state.folders.some((folder) => folder.id === id)) throw new Error("フォルダが見つかりません。");
+    for (const feed of this.state.feeds) {
+      if (feed.folderId === id) feed.folderId = null;
+    }
+    this.state.folders = this.state.folders.filter((folder) => folder.id !== id);
+  }
+
   mergeFeed(feed: Feed, articles: Article[]) {
     const index = this.state.feeds.findIndex((item) => item.id === feed.id);
     if (index === -1) this.state.feeds.push(feed);

@@ -90,6 +90,7 @@ export class Engine {
         break;
       }
       case "folder.save": this.store.saveFolder(action.id, action.name); break;
+      case "folder.remove": this.store.removeFolder(action.id); break;
       case "article.read": this.store.article(action.id).read = action.read; break;
       case "article.star": this.store.article(action.id).starred = action.starred; break;
       case "opml.import": return this.importOpml(action.xml, action.urls, action.folders);
