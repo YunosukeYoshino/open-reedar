@@ -87,7 +87,7 @@ export class Store {
     const existing = new Map(this.state.articles.map((article) => [article.id, article]));
     for (const article of articles) {
       const old = existing.get(article.id);
-      existing.set(article.id, old ? { ...article, read: old.read, starred: old.starred, receivedAt: old.receivedAt } : article);
+      existing.set(article.id, old ? { ...article, read: old.read, starred: old.starred, receivedAt: old.receivedAt, readerHtml: old.readerHtml, readerText: old.readerText } : article);
     }
     this.state.articles = [...existing.values()].sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
   }
