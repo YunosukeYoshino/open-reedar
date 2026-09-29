@@ -1,4 +1,5 @@
 import { createInterface } from "node:readline";
+import { StringDecoder } from "node:string_decoder";
 import { z } from "zod";
 import type { Agent, Connection, Conversation, Language } from "../../shared/schema";
 import { codexModel } from "../../shared/schema";
@@ -128,15 +129,19 @@ export async function runOrganizer(agent: Agent, prompt: string, cwd: string, si
 async function runFm(path: string, prompt: string, cwd: string, signal: AbortSignal, emit: (event: AgentEvent) => void, lang: Language = "en") {
   await new Promise<void>((resolve, reject) => {
     const child = launch(path, ["respond", prompt], cwd);
+    const decoder = new StringDecoder("utf8");
     let text = "";
+    let failure: Error | null = null;
     const abort = () => terminate(child);
     signal.addEventListener("abort", abort, { once: true });
-    const timer = setTimeout(() => terminate(child), 120_000);
-    child.stdout.on("data", (chunk: Buffer) => { text += chunk.toString(); emit({ type: "delta", text }); });
+    const timer = setTimeout(() => { failure = new Error("timeout"); terminate(child); }, 120_000);
+    child.stdout.on("data", (chunk: Buffer) => { text += decoder.write(chunk); emit({ type: "delta", text }); });
     child.once("error", reject);
     child.once("close", (code) => {
       clearTimeout(timer); signal.removeEventListener("abort", abort);
+      text += decoder.end();
       if (signal.aborted) reject(new LocalizedError(t(lang, "err.aborted")));
+      else if (failure) reject(failure);
       else if (code === 0 && text.trim()) resolve();
       else reject(new LocalizedError(t(lang, "err.appleFailed")));
     });
