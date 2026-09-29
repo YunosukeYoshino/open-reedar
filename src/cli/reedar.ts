@@ -18,6 +18,9 @@ Usage:
   reedar summarize <id> [--agent codex|claude] [--question <text>]
                                         Ask an installed agent CLI to summarize/answer about an article
 
+Output defaults to JSON when stdout is not a TTY (agents get data without --json).
+Errors and usage go to stderr; stdout carries data only.
+
 Environment:
   REEDAR_STORE   reader.json path (default: ~/Library/Application Support/Reedar/reader.json)
 `;
@@ -33,7 +36,7 @@ export async function loadState(path = process.env.REEDAR_STORE ?? defaultStoreP
   return stateSchema.parse(JSON.parse(raw));
 }
 
-type Out = (text: string) => void;
+type Io = { out: (text: string) => void; err?: (text: string) => void; json?: boolean };
 
 function flag(args: string[], name: string) { return args.includes(`--${name}`); }
 const VALUE_OPTIONS = new Set(["--question", "--agent", "--feed", "--limit"]);
@@ -81,12 +84,14 @@ function findArticle(state: ReaderState, id: string) {
   return article;
 }
 
-export async function cli(argv: string[], out: Out, run: typeof runReader = runReader): Promise<number> {
+export async function cli(argv: string[], io: Io, run: typeof runReader = runReader): Promise<number> {
+  const out = io.out;
+  const err = io.err ?? io.out;
   const [command, ...args] = argv;
   try {
     if (!command || command === "help" || command === "--help" || command === "-h") { out(USAGE.trimEnd()); return 0; }
     const state = await loadState();
-    const json = flag(args, "json");
+    const json = flag(args, "json") || !!io.json;
     if (command === "feeds") {
       const rows = feedRows(state);
       if (json) for (const row of rows) out(JSON.stringify(row));
@@ -101,7 +106,7 @@ export async function cli(argv: string[], out: Out, run: typeof runReader = runR
     }
     const id = positional(args)[0];
     if (command === "article") {
-      if (!id) { out("Usage: reedar article <id>"); return 1; }
+      if (!id) { err("Usage: reedar article <id>"); return 1; }
       const article = findArticle(state, id);
       const feed = state.feeds.find((feed) => feed.id === article.feedId);
       if (json) out(JSON.stringify(article, null, 2));
@@ -109,9 +114,9 @@ export async function cli(argv: string[], out: Out, run: typeof runReader = runR
       return 0;
     }
     if (command === "summarize") {
-      if (!id) { out("Usage: reedar summarize <id> [--agent codex|claude] [--question <text>]"); return 1; }
+      if (!id) { err("Usage: reedar summarize <id> [--agent codex|claude] [--question <text>]"); return 1; }
       const agent = (option(args, "agent") ?? "codex") as Agent;
-      if (!agentSchema.options.includes(agent)) { out(`不明なエージェントです: ${agent}`); return 1; }
+      if (!agentSchema.options.includes(agent)) { err(`不明なエージェントです: ${agent}`); return 1; }
       const article = findArticle(state, id);
       const conversation: Conversation = {
         id: "cli", articleId: article.id, agent,
@@ -127,16 +132,16 @@ export async function cli(argv: string[], out: Out, run: typeof runReader = runR
       out(json ? JSON.stringify({ articleId: article.id, agent, answer: text }) : text);
       return 0;
     }
-    out(`不明なコマンドです: ${command}\n\n${USAGE.trimEnd()}`);
+    err(`不明なコマンドです: ${command}\n\n${USAGE.trimEnd()}`);
     return 1;
   } catch (error) {
     const translated = agentError(error);
-    out(`エラー: ${translated.startsWith("エージェントの処理に失敗") && error instanceof Error ? error.message : translated}`);
+    err(`エラー: ${translated.startsWith("エージェントの処理に失敗") && error instanceof Error ? error.message : translated}`);
     return 1;
   }
 }
 
 if (import.meta.main) {
-  const code = await cli(process.argv.slice(2), (line) => console.log(line));
+  const code = await cli(process.argv.slice(2), { out: (line) => console.log(line), err: (line) => console.error(line), json: !process.stdout.isTTY });
   process.exit(code);
 }

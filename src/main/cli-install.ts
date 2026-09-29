@@ -20,7 +20,7 @@ The user's RSS library lives on this machine. The \`reedar\` CLI reads it direct
 - \`reedar article <id> [--json]\` — full article text
 - \`reedar summarize <id> [--agent codex|claude] [--question <text>]\` — summarize/answer using an installed agent CLI
 
-\`--json\` prints JSON Lines (one object per line) on list commands, suitable for \`jq\`/\`grep\` pipelines.
+\`--json\` prints JSON Lines (one object per line) on list commands; JSON is also the default whenever stdout is piped. Errors go to stderr, so stdout always carries parseable data.
 
 IDs may be passed truncated as long as they are unique. Articles persist on disk at
 \`~/Library/Application Support/Reedar/reader.json\`; override with \`REEDAR_STORE\`.

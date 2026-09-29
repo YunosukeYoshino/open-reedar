@@ -26,8 +26,9 @@ async function seed(name: string) {
 async function run(path: string, argv: string[], runner?: Parameters<typeof cli>[2]) {
   process.env.REEDAR_STORE = path;
   const lines: string[] = [];
-  const code = await cli(argv, (line) => lines.push(line), runner);
-  return { code, text: lines.join("\n") };
+  const errors: string[] = [];
+  const code = await cli(argv, { out: (line) => lines.push(line), err: (line) => errors.push(line) }, runner);
+  return { code, text: lines.join("\n"), errors: errors.join("\n") };
 }
 
 describe("reedar cli", () => {
@@ -79,7 +80,8 @@ describe("reedar cli", () => {
     expect(found.text).toContain("未読");
     const missing = await run(path, ["article", "zzz-nope"]);
     expect(missing.code).toBe(1);
-    expect(missing.text).toContain("記事が見つかりません");
+    expect(missing.errors).toContain("記事が見つかりません");
+    expect(missing.text).toBe("");
   });
 
   test("summarize sends the article through the agent runner", async () => {
@@ -97,9 +99,9 @@ describe("reedar cli", () => {
   });
 
   test("reports unreadable library", async () => {
-    const { code, text } = await run(join(directory, "missing", "reader.json"), ["feeds"]);
+    const { code, errors } = await run(join(directory, "missing", "reader.json"), ["feeds"]);
     expect(code).toBe(1);
-    expect(text).toContain("ライブラリを読み込めませんでした");
+    expect(errors).toContain("ライブラリを読み込めませんでした");
   });
 });
 
