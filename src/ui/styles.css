@@ -257,7 +257,7 @@ kbd { font: inherit; font-size: 9px; border: 1px solid #ffffff12; border-radius:
 .opml-preview-list { list-style: none; padding: 0; margin: 12px 0; max-height: 240px; overflow-y: auto; }
 .opml-preview-list li { padding: 6px 0; border-bottom: 1px solid var(--border); }
 .opml-preview-list label { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
-.opml-preview-list input[type="checkbox"] { margin-top: 2px; accent-color: var(--accent); flex-shrink: 0; }
+.opml-preview-list input[type="checkbox"] { width: auto; margin-top: 2px; accent-color: var(--accent); flex-shrink: 0; }
 .opml-entry-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .opml-entry-body strong { font-weight: 500; overflow-wrap: anywhere; }
 .opml-entry-url { color: var(--secondary); font-size: 10px; overflow-wrap: anywhere; }
