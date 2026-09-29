@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { cleanArticle, parseFeed, plainText } from "../src/main/feeds";
+import { cleanArticle, decodeBody, parseFeed, plainText } from "../src/main/feeds";
 import { isPublicAddress, publicUrl } from "../src/main/network";
 
 describe("feed ingestion", () => {
@@ -32,6 +32,21 @@ describe("feed ingestion", () => {
   test("rejects DTDs and invalid feeds", async () => {
     await expect(parseFeed('<!DOCTYPE rss [<!ENTITY secret SYSTEM "file:///etc/passwd">]><rss/>', "https://example.com/rss", null)).rejects.toThrow("外部エンティティ");
     await expect(parseFeed("<html>no feed</html>", "https://example.com/rss", null)).rejects.toThrow();
+  });
+
+  test("explains HTML pages are not feeds instead of reporting entities", async () => {
+    for (const html of ['<!DOCTYPE html><html><head><title>Site</title></head><body>x</body></html>', '<html lang="ja"><body>site</body></html>', '  \n<!doctype html><html></html>']) {
+      await expect(parseFeed(html, "https://example.com/", null)).rejects.toThrow("RSS/Atomとして読み込めませんでした");
+    }
+    await expect(parseFeed('<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body/></html>', "https://example.com/", null)).rejects.toThrow();
+  });
+
+  test("decodes feed bodies using the declared charset", () => {
+    const header = Buffer.from(`<?xml version="1.0" encoding="Shift_JIS"?><rss version="2.0"><channel><title>`, "ascii");
+    const footer = Buffer.from(`</title></channel></rss>`, "ascii");
+    const title = Buffer.from([0x83, 0x65, 0x83, 0x58, 0x83, 0x67]); // テスト in Shift_JIS
+    expect(decodeBody(Buffer.concat([header, title, footer]), "application/rss+xml")).toContain("<title>テスト</title>");
+    expect(decodeBody(Buffer.from('<rss version="2.0"><channel><title>plain</title></channel></rss>'), "text/xml")).toContain("plain");
   });
 });
 
