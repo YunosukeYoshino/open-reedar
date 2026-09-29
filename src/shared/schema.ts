@@ -95,11 +95,22 @@ export const opmlImportSchema = z.object({
 });
 export type OpmlImport = z.infer<typeof opmlImportSchema>;
 
+export const opmlPreviewSchema = z.object({
+  entries: z.array(z.object({
+    url: z.string(), title: z.string(), folderName: z.string().nullable(),
+    resolution: z.enum(["new", "duplicate", "restorable", "invalid", "inFileDuplicate"]),
+    detail: z.string().optional(),
+  })),
+  missingFeeds: z.array(z.object({ id: z.string(), title: z.string(), url: z.string(), folderName: z.string().nullable() })),
+});
+export type OpmlPreview = z.infer<typeof opmlPreviewSchema>;
+
 export const snapshotSchema = z.object({
   state: stateSchema,
   connections: z.array(connectionSchema),
   refreshing: z.boolean(),
   opmlImport: opmlImportSchema.nullable().optional(),
+  opmlPreview: opmlPreviewSchema.nullable().optional(),
 });
 export type Snapshot = z.infer<typeof snapshotSchema>;
 
@@ -117,7 +128,9 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("folder.save"), id: z.string().nullable(), name: z.string().trim().min(1).max(60) }),
   z.object({ type: z.literal("article.read"), id: z.string(), read: z.boolean() }),
   z.object({ type: z.literal("article.star"), id: z.string(), starred: z.boolean() }),
-  z.object({ type: z.literal("opml.import"), xml: z.string().min(1).max(262_144) }),
+  z.object({ type: z.literal("opml.import"), xml: z.string().min(1).max(262_144), urls: z.array(z.string()).max(200).optional() }),
+  z.object({ type: z.literal("opml.preview"), xml: z.string().min(1).max(262_144) }),
+  z.object({ type: z.literal("opml.previewClear") }),
   z.object({ type: z.literal("opml.stop") }),
   z.object({ type: z.literal("refresh") }),
   z.object({ type: z.literal("connections.refresh") }),

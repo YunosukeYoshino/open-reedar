@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
-import type { Action, Connection, Conversation, OpmlImport, Snapshot, Update } from "../shared/schema";
+import type { Action, Connection, Conversation, OpmlImport, OpmlPreview, Snapshot, Update } from "../shared/schema";
 import { agentSchema, codexModel } from "../shared/schema";
 import { agentError, AuthenticationRequired, connection, runReader } from "./agents/reader";
 import { loadArticleText } from "./article-text";
@@ -16,6 +16,7 @@ export class Engine {
   connections: Connection[] = agentSchema.options.map((agent) => ({ agent, installed: false, status: "checking", detail: "接続を確認しています" }));
   refreshing = false;
   opmlImport: OpmlImport | null = null;
+  opmlPreview: OpmlPreview | null = null;
   private importJob: { controller: AbortController; done: Promise<void> } | undefined;
   private listeners = new Set<(update: Update) => void>();
   private jobs = new Map<string, { controller: AbortController; done: Promise<void> }>();
@@ -27,7 +28,7 @@ export class Engine {
     await this.refreshConnections();
   }
 
-  get snapshot(): Snapshot { return { state: this.store.state, connections: this.connections, refreshing: this.refreshing, opmlImport: this.opmlImport }; }
+  get snapshot(): Snapshot { return { state: this.store.state, connections: this.connections, refreshing: this.refreshing, opmlImport: this.opmlImport, opmlPreview: this.opmlPreview }; }
 
   subscribe(listener: (update: Update) => void) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private emit(update: Update) { for (const listener of this.listeners) listener(update); }
@@ -79,7 +80,9 @@ export class Engine {
       case "folder.save": this.store.saveFolder(action.id, action.name); break;
       case "article.read": this.store.article(action.id).read = action.read; break;
       case "article.star": this.store.article(action.id).starred = action.starred; break;
-      case "opml.import": return this.importOpml(action.xml);
+      case "opml.import": return this.importOpml(action.xml, action.urls);
+      case "opml.preview": return this.previewOpml(action.xml);
+      case "opml.previewClear": this.opmlPreview = null; this.changed(); return;
       case "opml.stop": this.importJob?.controller.abort(); return;
       case "refresh": return this.refreshFeeds();
       case "connections.refresh": return this.refreshConnections();
@@ -91,9 +94,39 @@ export class Engine {
     this.changed();
   }
 
-  private async importOpml(xml: string) {
+  private async previewOpml(xml: string) {
+    let parsed;
+    try { parsed = await parseOpml(xml); }
+    catch (error) { this.opmlPreview = null; this.changed(); throw error; }
+    const seen = new Set<string>();
+    const opmlUrls = new Set<string>();
+    const folders = this.store.state.folders;
+    const entries: OpmlPreview["entries"] = [];
+    for (const entry of parsed) {
+      const base = { url: entry.url, title: entry.title, folderName: entry.folderName };
+      let url: string | undefined;
+      try { url = publicUrl(entry.url).href; }
+      catch { entries.push({ ...base, resolution: "invalid", detail: "公開HTTP/HTTPSのフィードURLではありません。" }); continue; }
+      if (seen.has(url)) { entries.push({ ...base, resolution: "inFileDuplicate", detail: "OPML内で重複しています。" }); continue; }
+      seen.add(url);
+      opmlUrls.add(url);
+      const existing = this.store.state.feeds.find((feed) => feed.url === url);
+      if (existing && !existing.removedAt) { entries.push({ ...base, resolution: "duplicate", detail: "登録済みです。" }); continue; }
+      if (existing) { entries.push({ ...base, resolution: "restorable", detail: "削除済み。復元できます。" }); continue; }
+      if (entry.folderName && entry.folderName.length > 60) { entries.push({ ...base, resolution: "invalid", detail: "フォルダ名を60文字以内にしてください。" }); continue; }
+      entries.push({ ...base, resolution: "new", detail: entry.folderName && !folders.some((folder) => folder.name === entry.folderName) ? `フォルダ「${entry.folderName}」を作成します。` : undefined });
+    }
+    const missingFeeds = this.store.state.feeds
+      .filter((feed) => !feed.removedAt && !opmlUrls.has(feed.url))
+      .map((feed) => ({ id: feed.id, title: feed.title, url: feed.url, folderName: folders.find((folder) => folder.id === feed.folderId)?.name ?? null }));
+    this.opmlPreview = { entries, missingFeeds };
+    this.changed();
+  }
+
+  private async importOpml(xml: string, urls?: string[]) {
     if (this.importJob) throw new Error("OPMLの読み込みは実行中です。");
-    const entries = await parseOpml(xml);
+    const selected = urls ? new Set(urls) : null;
+    const entries = (await parseOpml(xml)).filter((entry) => !selected || selected.has(entry.url));
     if (this.importJob) throw new Error("OPMLの読み込みは実行中です。");
     const report: OpmlImport = { status: "running", total: entries.length, results: [] };
     this.opmlImport = report;
@@ -140,7 +173,7 @@ export class Engine {
       } catch {
         report.status = "failed";
         report.error = "OPMLの読み込みを完了できませんでした。登録済みのフィードは保持されています。";
-      } finally { this.importJob = undefined; this.changed(); }
+      } finally { this.importJob = undefined; this.opmlPreview = null; this.changed(); }
     })();
     this.importJob = { controller, done };
     void done.catch(() => {});
