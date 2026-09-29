@@ -136,8 +136,10 @@ export class Engine {
   }
 
   private async fetchArticleText(id: string) {
-    const article = this.store.article(id);
-    const result = await this.dependencies.fetchArticleText(article.url, new AbortController().signal, this.store.state.language);
+    const url = this.store.article(id).url;
+    const result = await this.dependencies.fetchArticleText(url, new AbortController().signal, this.store.state.language);
+    const article = this.store.state.articles.find((item) => item.id === id);
+    if (!article || article.url !== url) return;
     article.readerHtml = result.html;
     article.readerText = result.text;
     await this.store.save();
