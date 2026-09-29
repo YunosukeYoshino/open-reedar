@@ -23,11 +23,13 @@ describe("reader persistence", () => {
     store.article("article").starred = true;
     store.article("article").readerHtml = "<p>Reader</p>";
     store.article("article").readerText = "Reader";
+    store.article("article").note = "Follow up";
+    store.article("article").highlights = ["Important line"];
     store.state.conversations.push({ id: "conversation", articleId: "article", agent: "codex", source: { title: article.title, url: article.url, text: article.text, capturedAt: article.receivedAt }, messages: [] });
     store.mergeFeed({ ...feed, title: "Renamed" }, [{ ...article, text: "Updated" }]);
     await store.save();
     const reopened = await Store.open(path);
-    expect(reopened.article("article")).toMatchObject({ read: true, starred: true, text: "Updated", readerHtml: "<p>Reader</p>", readerText: "Reader" });
+    expect(reopened.article("article")).toMatchObject({ read: true, starred: true, text: "Updated", readerHtml: "<p>Reader</p>", readerText: "Reader", note: "Follow up", highlights: ["Important line"] });
     expect(reopened.article("old").text).toBe("Original");
     expect(reopened.state.conversations[0]?.source.text).toBe("Original");
     expect(reopened.state.feeds[0]?.title).toBe("Renamed");

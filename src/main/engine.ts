@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { z } from "zod";
-import type { Action, Agent, CliInstall, Connection, Conversation, OpmlImport, OpmlPreview, OrganizeJob, Snapshot, Update } from "../shared/schema";
+import type { Action, Agent, CliInstall, Connection, Conversation, DigestJob, OpmlImport, OpmlPreview, OrganizeJob, Snapshot, Update } from "../shared/schema";
 import { agentSchema, codexModel } from "../shared/schema";
 import { agentError, AuthenticationRequired, connection, LocalizedError, runOrganizer, runReader } from "./agents/reader";
 import { loadArticleText } from "./article-text";
@@ -35,6 +35,8 @@ export class Engine {
   private markReadUndoIds: string[] = [];
   private feedDiscovery: { url: string; candidates: { url: string; title: string }[] } | null = null;
   private feedDiscoveryToken = 0;
+  private digest: DigestJob | null = null;
+  private digestJob: { controller: AbortController; done: Promise<void> } | undefined;
   private listeners = new Set<(update: Update) => void>();
   private jobs = new Map<string, { controller: AbortController; done: Promise<void> }>();
 
@@ -67,7 +69,7 @@ export class Engine {
       .finally(() => { this.refreshJob = undefined; });
   }
 
-  get snapshot(): Snapshot { return { state: this.store.state, connections: this.connections, refreshing: this.refreshing, opmlImport: this.opmlImport, opmlPreview: this.opmlPreview, organize: this.organize, cliInstall: this.cliInstall, markReadUndo: this.markReadUndoIds.length ? { count: this.markReadUndoIds.length } : null, feedDiscovery: this.feedDiscovery }; }
+  get snapshot(): Snapshot { return { state: this.store.state, connections: this.connections, refreshing: this.refreshing, opmlImport: this.opmlImport, opmlPreview: this.opmlPreview, organize: this.organize, cliInstall: this.cliInstall, markReadUndo: this.markReadUndoIds.length ? { count: this.markReadUndoIds.length } : null, feedDiscovery: this.feedDiscovery, digest: this.digest }; }
 
   subscribe(listener: (update: Update) => void) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private emit(update: Update) { for (const listener of this.listeners) listener(update); }
@@ -163,8 +165,28 @@ export class Engine {
       }
       case "article.fetchText": return this.fetchArticleText(action.id);
       case "article.star": this.store.article(action.id).starred = action.starred; break;
+      case "article.note": {
+        const article = this.store.article(action.id);
+        if (action.note.trim()) article.note = action.note; else delete article.note;
+        break;
+      }
+      case "article.highlights": {
+        const article = this.store.article(action.id);
+        if (action.highlights.length) article.highlights = action.highlights; else delete article.highlights;
+        break;
+      }
       case "app.setLanguage": this.store.state.language = action.language; void this.refreshConnections(); break;
       case "app.setRefreshInterval": this.store.state.refreshMinutes = action.minutes; this.scheduleAutoRefresh(); break;
+      case "app.setFontSize": this.store.state.fontSize = action.size; break;
+      case "app.setDefaultAgent": this.store.state.defaultAgent = action.agent; break;
+      case "digest.run": this.runDigest(action.articleIds, action.agent); return;
+      case "digest.cancel": this.digestJob?.controller.abort(); return;
+      case "digest.clear": {
+        if (this.digestJob) throw new Error(this.t("err.digestRunning"));
+        this.digest = null;
+        this.changed();
+        return;
+      }
       case "opml.import": return this.importOpml(action.xml, action.urls, action.folders);
       case "opml.preview": return this.previewOpml(action.xml);
       case "opml.previewClear": this.opmlPreview = null; this.changed(); return;
@@ -430,6 +452,46 @@ export class Engine {
     } finally { this.refreshing = false; this.changed(); }
   }
 
+  private runDigest(articleIds: string[], agent: Agent) {
+    if (this.digestJob) throw new Error(this.t("err.digestRunning"));
+    const picked = articleIds.map((id) => this.store.state.articles.find((article) => article.id === id)).filter((article) => article !== undefined);
+    // ponytail: articles share a 150k-char text budget so the JSON prompt stays under the 180k run() cap; upgrade path is chunking with a map pass.
+    const perArticle = Math.min(15_000, Math.floor(150_000 / Math.max(picked.length, 1)));
+    const source = picked.map((article) => `## ${article.title}\n${article.url}\n\n${(article.readerText ?? article.text).slice(0, perArticle)}`).join("\n\n");
+    if (picked.filter((article) => (article.readerText ?? article.text).trim()).length < 2) {
+      this.digest = { status: "failed", agent, text: "", titles: picked.map((article) => article.title), detail: this.t("err.digestEmpty") };
+      this.changed();
+      return;
+    }
+    const conversation: Conversation = {
+      id: randomUUID(), articleId: picked[0]!.id, agent,
+      source: { title: `${picked.length} articles`, url: "", text: source, capturedAt: new Date().toISOString() },
+      messages: [],
+    };
+    const controller = new AbortController();
+    this.digest = { status: "running", agent, text: "", titles: picked.map((article) => article.title) };
+    this.changed();
+    const question = this.t("prompt.digest", { count: picked.length });
+    const done = (async () => {
+      try {
+        await this.dependencies.run(agent, conversation, question, this.runnerDirectory, controller.signal, (event) => {
+          if (controller.signal.aborted || !this.digest) return;
+          if (event.type === "delta") this.digest.text = event.text;
+          else this.digest.detail = event.reason;
+          this.changed();
+        }, this.store.state.language);
+        if (!controller.signal.aborted && this.digest) this.digest.status = "completed";
+      } catch (error) {
+        if (this.digest) {
+          this.digest.status = controller.signal.aborted ? "cancelled" : "failed";
+          if (!controller.signal.aborted) this.digest.detail = agentError(error, this.store.state.language);
+        }
+      } finally { this.digestJob = undefined; this.changed(); }
+    })();
+    this.digestJob = { controller, done };
+    void done.catch(() => { this.changed(); });
+  }
+
   private async send(articleId: string, agent: Conversation["agent"], text: string, purpose: "chat" | "summary" = "chat") {
     const article = this.store.article(articleId);
     if (this.store.state.feeds.find((feed) => feed.id === article.feedId)?.removedAt) throw new Error(this.t("err.removedFeed"));
@@ -513,7 +575,7 @@ export class Engine {
     this.changed();
   }
 
-  async settle() { await Promise.all([...this.jobs.values()].map((job) => job.done).concat(this.importJob ? [this.importJob.done] : []).concat(this.organizeRun ? [this.organizeRun.done] : [])); }
+  async settle() { await Promise.all([...this.jobs.values()].map((job) => job.done).concat(this.importJob ? [this.importJob.done] : []).concat(this.organizeRun ? [this.organizeRun.done] : []).concat(this.digestJob ? [this.digestJob.done] : [])); }
 
   async close() {
     if (this.autoRefreshTimer) clearInterval(this.autoRefreshTimer);
@@ -521,6 +583,7 @@ export class Engine {
     await this.refreshJob?.catch(() => {});
     this.importJob?.controller.abort();
     this.organizeRun?.controller.abort();
+    this.digestJob?.controller.abort();
     for (const job of this.jobs.values()) job.controller.abort();
     await this.settle();
     await this.store.save();

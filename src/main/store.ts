@@ -22,7 +22,7 @@ export class Store {
       if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
         throw new Error(t("en", "err.storeUnreadable"), { cause: error });
       }
-      state = { version: 1, folders: [], feeds: [], articles: [], conversations: [], language: "en", refreshMinutes: 30 };
+      state = { version: 1, folders: [], feeds: [], articles: [], conversations: [], language: "en", refreshMinutes: 30, fontSize: "m" };
     }
     for (const conversation of state.conversations) {
       for (const message of conversation.messages) {
@@ -87,7 +87,7 @@ export class Store {
     const existing = new Map(this.state.articles.map((article) => [article.id, article]));
     for (const article of articles) {
       const old = existing.get(article.id);
-      existing.set(article.id, old ? { ...article, read: old.read, starred: old.starred, receivedAt: old.receivedAt, ...(old.url === article.url ? { readerHtml: old.readerHtml ?? article.readerHtml, readerText: old.readerText ?? article.readerText } : {}) } : article);
+      existing.set(article.id, old ? { ...article, read: old.read, starred: old.starred, receivedAt: old.receivedAt, note: old.note ?? article.note, highlights: old.highlights ?? article.highlights, ...(old.url === article.url ? { readerHtml: old.readerHtml ?? article.readerHtml, readerText: old.readerText ?? article.readerText } : {}) } : article);
     }
     this.state.articles = [...existing.values()].sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
   }
