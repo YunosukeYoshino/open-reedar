@@ -64,7 +64,9 @@ describe("reedar cli", () => {
     const none = await run(path, ["articles", "--feed", "missing"]);
     expect(none.text).toBe("");
     const limited = await run(path, ["articles", "--limit", "1", "--json"]);
-    expect(JSON.parse(limited.text)).toHaveLength(1);
+    const rows = limited.text.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.title).toBeDefined();
   });
 
   test("article prints full record and errors on unknown id", async () => {

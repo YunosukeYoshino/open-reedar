@@ -13,6 +13,7 @@ Usage:
   reedar feeds [--json]                 Feed list with unread/star counts (excludes removed feeds)
   reedar articles [--unread] [--starred] [--feed <text>] [--limit N] [--json]
                                         Articles, newest first (default limit 50)
+                                        --json prints JSON Lines (one object per line) for piping
   reedar article <id> [--json]          One article with full text
   reedar summarize <id> [--agent codex|claude] [--question <text>]
                                         Ask an installed agent CLI to summarize/answer about an article
@@ -88,13 +89,13 @@ export async function cli(argv: string[], out: Out, run: typeof runReader = runR
     const json = flag(args, "json");
     if (command === "feeds") {
       const rows = feedRows(state);
-      if (json) out(JSON.stringify(rows, null, 2));
+      if (json) for (const row of rows) out(JSON.stringify(row));
       else for (const row of rows) out(`${row.unread > 0 ? "●" : "○"} ${row.title} [${row.folder ?? "フォルダなし"}] 未読${row.unread}/${row.articles}${row.error ? ` エラー: ${row.error}` : ""}\n    ${row.url}`);
       return 0;
     }
     if (command === "articles") {
       const rows = articleRows(state, args);
-      if (json) out(JSON.stringify(rows, null, 2));
+      if (json) for (const row of rows) out(JSON.stringify(row));
       else for (const row of rows) out(`${row.read ? " " : "●"}${row.starred ? "★" : " "} ${row.publishedAt.slice(0, 10)} ${row.title}  (${row.feed})\n    ${row.id}`);
       return 0;
     }
