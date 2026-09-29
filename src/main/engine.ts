@@ -128,11 +128,16 @@ export class Engine {
       }
       case "folder.save": this.store.saveFolder(action.id, action.name); break;
       case "folder.remove": this.store.removeFolder(action.id); break;
-      case "article.read": this.store.article(action.id).read = action.read; break;
+      case "article.read": {
+        this.store.article(action.id).read = action.read;
+        // An explicit per-article change supersedes the bulk operation so undo does not overwrite it.
+        this.markReadUndoIds = this.markReadUndoIds.filter((id) => id !== action.id);
+        break;
+      }
       case "articles.markRead": {
-        const ids = action.scope.type === "feed" ? new Set([action.scope.id]) : new Set(this.store.state.feeds.filter((feed) => feed.folderId === action.scope.id).map((feed) => feed.id));
+        const ids = action.scope.type === "feed" ? new Set([action.scope.id]) : new Set(this.store.state.feeds.filter((feed) => !feed.removedAt && feed.folderId === action.scope.id).map((feed) => feed.id));
         this.markReadUndoIds = [];
-        for (const article of this.store.state.articles) if (ids.has(article.feedId) && !article.read) { article.read = true; this.markReadUndoIds.push(article.id); }
+        for (const article of this.store.state.articles) if (ids.has(article.feedId) && !this.store.state.feeds.find((feed) => feed.id === article.feedId)?.removedAt && !article.read) { article.read = true; this.markReadUndoIds.push(article.id); }
         break;
       }
       case "articles.markReadUndo": {
