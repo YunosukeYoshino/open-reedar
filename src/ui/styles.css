@@ -40,7 +40,18 @@ svg { flex-shrink: 0; }
 .folder-edit { width: 21px; opacity: 0; }
 .folder-row:hover .folder-edit, .folder-edit:focus-visible { opacity: 1; }
 .folder-feeds { margin-left: 12px; }
+.feed-row-wrap { display: flex; align-items: center; border-radius: 5px; }
+.feed-row-wrap:hover { background: var(--hover); }
+.feed-row-wrap.selected { background: #313137; color: #f3f1ef; }
+.feed-row-wrap .feed-row { flex: 1; min-width: 0; }
+.feed-row-wrap .feed-row:hover { background: transparent; }
+.feed-row-wrap.selected .feed-row { background: transparent; color: inherit; }
 .feed-row { font-size: 12px; gap: 9px; }
+.mark-read { width: 22px; opacity: 0; flex-shrink: 0; }
+.feed-row-wrap:hover .mark-read, .folder-row:hover .mark-read, .mark-read:focus-visible { opacity: 1; }
+.undo-banner { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 8px 6px; padding: 6px 9px; border-radius: 6px; background: var(--hover); font-size: 11px; color: var(--secondary); }
+.undo-banner button { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 4px; }
+.undo-banner button:hover { background: var(--panel); }
 .feed-monogram { font-family: ui-serif, Georgia, serif; background: #403d36; color: #d8c097; width: 18px; height: 18px; border-radius: 4px; display: grid; place-items: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
 .feed-monogram[data-tone="1"] { background: #303d44; color: #9bbccb; }
 .feed-monogram[data-tone="2"] { background: #363f38; color: #adbea7; }

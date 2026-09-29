@@ -407,4 +407,47 @@ describe("reading workflow", () => {
     expect((await Store.open(path)).state.refreshMinutes).toBe(45);
     await engine.close();
   });
+
+  test("bulk mark-read with undo restores only the flipped articles", async () => {
+    const { engine, store, article } = await setup("mark-read", async () => {});
+    store.saveFolder(null, "Folder");
+    const folder = store.state.folders[0]!;
+    store.state.feeds[0]!.folderId = folder.id;
+    article.read = true;
+    const unread = await parseFeed(xml.replaceAll("article", "second"), "https://example.com/rss", null);
+    store.state.articles.push(...unread.articles);
+    expect(store.state.articles.filter((item) => !item.read)).toHaveLength(1);
+    await engine.dispatch({ type: "articles.markRead", scope: { type: "folder", id: folder.id } });
+    expect(store.state.articles.every((item) => item.read)).toBe(true);
+    expect(engine.snapshot.markReadUndo).toEqual({ count: 1 });
+    await engine.dispatch({ type: "articles.markReadUndo" });
+    expect(store.state.articles.filter((item) => !item.read)).toHaveLength(1);
+    expect(store.state.articles[0]?.read).toBe(true);
+    expect(engine.snapshot.markReadUndo).toBeNull();
+    await engine.close();
+  });
+  test("bulk mark-read skips removed feeds and undo skips articles touched afterwards", async () => {
+    const { engine, store, article } = await setup("mark-read-undo", async () => {});
+    const folder = store.state.folders[0] ?? (store.saveFolder(null, "Folder"), store.state.folders[0]!);
+    store.state.feeds[0]!.folderId = folder.id;
+    const removed = await parseFeed(xml.replaceAll("article", "removed"), "https://example.com/rss2", null);
+    removed.feed.folderId = folder.id;
+    removed.feed.removedAt = new Date().toISOString();
+    store.state.feeds.push(removed.feed);
+    store.state.articles.push(...removed.articles);
+    article.read = true;
+    await engine.dispatch({ type: "articles.markRead", scope: { type: "folder", id: folder.id } });
+    expect(store.state.articles.filter((item) => item.feedId === removed.feed.id).every((item) => !item.read)).toBe(true);
+    expect(engine.snapshot.markReadUndo).toBeNull();
+    const fresh = await parseFeed(xml.replaceAll("article", "third"), "https://example.com/rss", null);
+    store.state.articles.push(...fresh.articles);
+    await engine.dispatch({ type: "articles.markRead", scope: { type: "feed", id: store.state.feeds[0]!.id } });
+    expect(engine.snapshot.markReadUndo?.count).toBeGreaterThan(0);
+    const touched = store.state.articles.at(-1)!;
+    await engine.dispatch({ type: "article.read", id: touched.id, read: false });
+    await engine.dispatch({ type: "article.read", id: touched.id, read: true });
+    await engine.dispatch({ type: "articles.markReadUndo" });
+    expect(touched.read).toBe(true);
+    await engine.close();
+  });
 });

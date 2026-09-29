@@ -140,6 +140,7 @@ export const snapshotSchema = z.object({
   opmlPreview: opmlPreviewSchema.nullable().optional(),
   organize: organizeJobSchema.nullable().optional(),
   cliInstall: cliInstallSchema.nullable().optional(),
+  markReadUndo: z.object({ count: z.number().int().nonnegative() }).nullable().optional(),
 });
 export type Snapshot = z.infer<typeof snapshotSchema>;
 
@@ -157,6 +158,8 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("folder.save"), id: z.string().nullable(), name: z.string().trim().min(1).max(60) }),
   z.object({ type: z.literal("folder.remove"), id: z.string() }),
   z.object({ type: z.literal("article.read"), id: z.string(), read: z.boolean() }),
+  z.object({ type: z.literal("articles.markRead"), scope: z.object({ type: z.enum(["feed", "folder"]), id: z.string() }) }),
+  z.object({ type: z.literal("articles.markReadUndo") }),
   z.object({ type: z.literal("article.fetchText"), id: z.string() }),
   z.object({ type: z.literal("article.star"), id: z.string(), starred: z.boolean() }),
   z.object({ type: z.literal("opml.import"), xml: z.string().min(1).max(262_144), urls: z.array(z.string()).max(200).optional(), folders: z.record(z.string(), z.string().trim().min(1).max(60)).optional() }),

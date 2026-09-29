@@ -37,6 +37,9 @@ const en = {
   "sidebar.expand": "Expand",
   "sidebar.collapse": "Collapse",
   "sidebar.editFolder": "Rename {name}",
+  "sidebar.markRead": "Mark all as read",
+  "sidebar.markedRead": "{count} marked read",
+  "sidebar.undo": "Undo",
 
   // Article list
   "list.articles": "Articles",
@@ -458,6 +461,9 @@ const ja: Record<MessageKey, string> = {
   "sidebar.expand": "展開",
   "sidebar.collapse": "折りたたむ",
   "sidebar.editFolder": "{name}の名前を変更",
+  "sidebar.markRead": "すべて既読にする",
+  "sidebar.markedRead": "{count}件を既読にしました",
+  "sidebar.undo": "元に戻す",
 
   "list.articles": "記事一覧",
   "list.count": "{count}件の記事",

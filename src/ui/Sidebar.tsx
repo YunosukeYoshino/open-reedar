@@ -1,4 +1,4 @@
-import { ArrowDownUp, BookOpen, Bot, ChevronDown, ChevronRight, Circle, Folder, FolderPlus, MoreHorizontal, Plus, RefreshCw, Rss, Star } from "lucide-react";
+import { ArrowDownUp, BookOpen, Bot, CheckCheck, ChevronDown, ChevronRight, Circle, Folder, FolderPlus, MoreHorizontal, Plus, RefreshCw, Rss, Star, Undo2 } from "lucide-react";
 import { useState } from "react";
 import type { Action, ReaderState } from "../shared/schema";
 import { tone } from "./format";
@@ -7,12 +7,12 @@ import { useT } from "./i18n";
 export type Scope = { type: "all" } | { type: "feed" | "folder"; id: string };
 export type Filter = "all" | "unread" | "starred";
 type Props = {
-  state: ReaderState; scope: Scope; filter: Filter; refreshing: boolean;
+  state: ReaderState; scope: Scope; filter: Filter; refreshing: boolean; markReadUndo: { count: number } | null;
   select: (scope: Scope, filter?: Filter) => void; perform: (action: Action) => void;
   editFolder: (id: string | null) => void;
 };
 
-export function Sidebar({ state, scope, filter, refreshing, select, perform, editFolder }: Props) {
+export function Sidebar({ state, scope, filter, refreshing, markReadUndo, select, perform, editFolder }: Props) {
   const t = useT();
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const unread = state.articles.filter((article) => !article.read).length;
@@ -23,10 +23,13 @@ export function Sidebar({ state, scope, filter, refreshing, select, perform, edi
   }).length;
   const feedRow = (feed: ReaderState["feeds"][number]) => {
     const count = state.articles.filter((article) => article.feedId === feed.id && !article.read).length;
-    return <button key={feed.id} className={`nav-row feed-row ${scope.type === "feed" && scope.id === feed.id ? "selected" : ""}`} onClick={() => select({ type: "feed", id: feed.id })} title={feed.error ?? feed.title}>
-      <span className="feed-monogram" data-tone={tone(feed.title)}>{feed.title.slice(0, 1)}</span><span className="nav-label">{feed.title}</span>
-      {feed.error ? <span className="feed-error-dot" aria-label={t("sidebar.updateError")} /> : count > 0 ? <span className="nav-count">{count}</span> : null}
-    </button>;
+    return <div className={`feed-row-wrap ${scope.type === "feed" && scope.id === feed.id ? "selected" : ""}`} key={feed.id}>
+      <button className="nav-row feed-row" onClick={() => select({ type: "feed", id: feed.id })} title={feed.error ?? feed.title}>
+        <span className="feed-monogram" data-tone={tone(feed.title)}>{feed.title.slice(0, 1)}</span><span className="nav-label">{feed.title}</span>
+        {feed.error ? <span className="feed-error-dot" aria-label={t("sidebar.updateError")} /> : count > 0 ? <span className="nav-count">{count}</span> : null}
+      </button>
+      {count > 0 ? <button className="icon-button mark-read" aria-label={t("sidebar.markRead")} title={t("sidebar.markRead")} onClick={() => perform({ type: "articles.markRead", scope: { type: "feed", id: feed.id } })}><CheckCheck size={13} /></button> : null}
+    </div>;
   };
   return <aside className="sidebar" aria-label={t("sidebar.library")}>
     <div className="sidebar-header"><button className="brand" onClick={() => select({ type: "all" }, "all")}><Rss size={21} strokeWidth={2.4} /><span>Reedar</span></button>
@@ -48,6 +51,7 @@ export function Sidebar({ state, scope, filter, refreshing, select, perform, edi
           <div className={`folder-row ${scope.type === "folder" && scope.id === folder.id ? "selected" : ""}`}>
             <button className="folder-toggle icon-button" aria-label={t("sidebar.collapseFolder", { action: folded ? t("sidebar.expand") : t("sidebar.collapse"), name: folder.name })} aria-expanded={!folded} onClick={() => setCollapsed((previous) => { const next = new Set(previous); if (next.has(folder.id)) next.delete(folder.id); else next.add(folder.id); return next; })}>{folded ? <ChevronRight size={13} /> : <ChevronDown size={13} />}</button>
             <button className="folder-select" onClick={() => select({ type: "folder", id: folder.id })}><Folder size={15} /><span className="nav-label">{folder.name}</span><span className="nav-count">{count || ""}</span></button>
+            {count > 0 ? <button className="icon-button mark-read" aria-label={t("sidebar.markRead")} title={t("sidebar.markRead")} onClick={() => perform({ type: "articles.markRead", scope: { type: "folder", id: folder.id } })}><CheckCheck size={13} /></button> : null}
             <button className="icon-button folder-edit" commandfor="folder-dialog" command="show-modal" onClick={() => editFolder(folder.id)} aria-label={t("sidebar.editFolder", { name: folder.name })}><MoreHorizontal size={14} /></button>
           </div>
           {!folded ? <div className="folder-feeds">{feeds.length ? feeds.map(feedRow) : <p className="empty-folder">{t("sidebar.folderAddFeeds")}</p>}</div> : null}
@@ -56,6 +60,7 @@ export function Sidebar({ state, scope, filter, refreshing, select, perform, edi
       <div className="unfiled-feeds">{state.feeds.filter((feed) => feed.folderId === null).map(feedRow)}</div>
       {!state.feeds.length ? <button className="add-first-feed" commandfor="feed-dialog" command="show-modal"><Plus size={15} />{t("sidebar.addFirstFeed")}</button> : null}
     </div>
+    {markReadUndo ? <div className="undo-banner" role="status"><span>{t("sidebar.markedRead", { count: markReadUndo.count })}</span><button onClick={() => perform({ type: "articles.markReadUndo" })}><Undo2 size={12} />{t("sidebar.undo")}</button></div> : null}
     <div className="sidebar-bottom">
       <button className="nav-row" commandfor="opml-dialog" command="show-modal"><ArrowDownUp size={16} /><span className="nav-label">{t("sidebar.opml")}</span></button>
       <button className="nav-row" commandfor="activity-dialog" command="show-modal"><Bot size={17} /><span className="nav-label">{t("sidebar.conversations")}</span>{activeRuns ? <span className="activity-count">{activeRuns}</span> : <span className="nav-count">{state.conversations.length || ""}</span>}</button>
