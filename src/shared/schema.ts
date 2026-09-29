@@ -140,6 +140,7 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("feed.restore"), id: z.string() }),
   z.object({ type: z.literal("feed.move"), id: z.string(), folderId: z.string().nullable() }),
   z.object({ type: z.literal("folder.save"), id: z.string().nullable(), name: z.string().trim().min(1).max(60) }),
+  z.object({ type: z.literal("folder.remove"), id: z.string() }),
   z.object({ type: z.literal("article.read"), id: z.string(), read: z.boolean() }),
   z.object({ type: z.literal("article.star"), id: z.string(), starred: z.boolean() }),
   z.object({ type: z.literal("opml.import"), xml: z.string().min(1).max(262_144), urls: z.array(z.string()).max(200).optional(), folders: z.record(z.string(), z.string().trim().min(1).max(60)).optional() }),
