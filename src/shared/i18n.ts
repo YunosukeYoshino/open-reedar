@@ -96,6 +96,7 @@ const en = {
   "reader.readerView": "Reader view",
   "reader.feedView": "Feed version",
   "reader.fetchingArticle": "Fetching the article…",
+  "reader.caughtUp": "You're all caught up.",
 
   // AI panel
   "ai.panel": "Conversation with AI",
@@ -510,6 +511,7 @@ const ja: Record<MessageKey, string> = {
   "reader.readerView": "リーダー表示",
   "reader.feedView": "フィードの表示",
   "reader.fetchingArticle": "記事を取得しています…",
+  "reader.caughtUp": "すべて読み終えました",
 
   "ai.panel": "AIとの会話",
   "ai.closePanel": "AIパネルを閉じる",
