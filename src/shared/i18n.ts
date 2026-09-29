@@ -115,6 +115,7 @@ const en = {
   // Digest dialog
   "digest.title": "Compare articles",
   "digest.description": "Pick 2–20 articles and an agent writes a comparative digest.",
+  "digest.maxReached": "Up to 20 articles per digest.",
   "digest.select": "{selected} selected",
   "digest.run": "Generate digest ({count})",
   "digest.stop": "Stop",
@@ -565,6 +566,7 @@ const ja: Record<MessageKey, string> = {
 
   "digest.title": "記事を比較",
   "digest.description": "記事を2〜20件選ぶとエージェントが比較ダイジェストを作成します。",
+  "digest.maxReached": "1回のダイジェストは20件までです。",
   "digest.select": "{selected}件選択中",
   "digest.run": "ダイジェストを生成（{count}件）",
   "digest.stop": "停止",

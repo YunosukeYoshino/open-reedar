@@ -40,7 +40,7 @@ export function App() {
   const agent = pinnedAgent ?? snapshot?.state.defaultAgent ?? "codex";
   const setAgent = (value: Agent) => { setPinnedAgent(null); perform({ type: "app.setDefaultAgent", agent: value }); };
   const conversation = state?.conversations.find((item) => item.articleId === selectedId && item.agent === agent);
-  function selectArticle(item: Article) { setSelectedId(item.id); if (!item.read) perform({ type: "article.read", id: item.id, read: true }); }
+  function selectArticle(item: Article) { setSelectedId(item.id); setPinnedAgent(null); if (!item.read) perform({ type: "article.read", id: item.id, read: true }); }
   function move(offset: number) { const item = articles[index + offset]; if (item) selectArticle(item); }
   function openConversation(item: Conversation) { setScope({ type: "all" }); setFilter("all"); setSearch(""); setSelectedId(item.articleId); setPinnedAgent(item.agent); setAiOpen(true); }
   useEffect(() => {

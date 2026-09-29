@@ -74,8 +74,8 @@ function DigestSection({ articles, digest, readyAgent, act, perform }: { article
     </div>
   </section>;
   return <>
-    <ul className="opml-preview-list">{articles.map((article) => <li key={article.id}><label><input type="checkbox" checked={picked.has(article.id)} disabled={running} onChange={(event) => toggle(article.id, event.target.checked)} /><span className="opml-entry-body"><strong>{article.title}</strong></span></label></li>)}</ul>
-    {picked.size < 2 ? <p className="dialog-description">{t("digest.needTwo")}</p> : <p className="dialog-description">{t("digest.select", { selected: picked.size })}</p>}
+    <ul className="opml-preview-list">{articles.map((article) => <li key={article.id}><label><input type="checkbox" checked={picked.has(article.id)} disabled={running || (!picked.has(article.id) && picked.size >= 20)} onChange={(event) => toggle(article.id, event.target.checked)} /><span className="opml-entry-body"><strong>{article.title}</strong></span></label></li>)}</ul>
+    {picked.size < 2 ? <p className="dialog-description">{t("digest.needTwo")}</p> : <p className="dialog-description">{t(picked.size >= 20 ? "digest.maxReached" : "digest.select", { selected: picked.size })}</p>}
     {error ? <p className="form-error" role="alert">{error}</p> : null}
     {running ? <div className="dialog-actions"><p className="dialog-description"><LoaderCircle size={13} className="spin" /> {digest?.titles.join(" · ")}</p><button className="secondary-button" type="button" onClick={() => perform({ type: "digest.cancel" })}>{t("digest.stop")}</button></div>
       : <div className="dialog-actions"><button className="primary-button" type="button" disabled={picked.size < 2 || !readyAgent} onClick={() => { setError(null); void act({ type: "digest.run", articleIds: [...picked], agent: readyAgent! }).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : t("digest.needTwo"))); }}>{t("digest.run", { count: picked.size })}</button></div>}
