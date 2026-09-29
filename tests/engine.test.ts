@@ -426,4 +426,21 @@ describe("reading workflow", () => {
     expect(engine.snapshot.markReadUndo).toBeNull();
     await engine.close();
   });
+  test("digest refuses articles without body text and streams into the snapshot", async () => {
+    let question = "";
+    const { engine, store, article } = await setup("digest", async (_agent, _conversation, q, _cwd, _signal, emit) => { question = q; emit({ type: "delta", text: "Digest" }); });
+    const empty = await parseFeed(xml, "https://example.com/rss2", null);
+    empty.articles.forEach((item) => { item.text = ""; });
+    store.state.articles.push(...empty.articles);
+    await engine.dispatch({ type: "digest.run", articleIds: [empty.articles[0]!.id, empty.articles[1]?.id ?? empty.articles[0]!.id], agent: "codex" });
+    expect(engine.snapshot.digest?.status).toBe("failed");
+    await engine.dispatch({ type: "digest.clear" });
+    const second = await parseFeed(xml.replaceAll("article", "peer"), "https://example.com/rss", null);
+    store.state.articles.push(...second.articles);
+    await engine.dispatch({ type: "digest.run", articleIds: [article.id, second.articles[0]!.id], agent: "codex" });
+    await engine.settle();
+    expect(engine.snapshot.digest).toMatchObject({ status: "completed", text: "Digest" });
+    expect(question.length).toBeGreaterThan(0);
+    await engine.close();
+  });
 });
