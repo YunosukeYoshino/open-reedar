@@ -100,7 +100,7 @@ export async function startServer(options: Options) {
     if (request.method === "GET" && url.pathname === "/image") {
       const image = url.searchParams.get("url") ?? "";
       const encoded = `/image?url=${encodeURIComponent(image)}`;
-      if (!image || image.length > 2048 || !store.state.articles.some((article) => article.imageUrl === image || article.html.includes(encoded))) return json(response, 404, { error: t(store.state.language, "err.imageMissing") });
+      if (!image || image.length > 2048 || !store.state.articles.some((article) => article.imageUrl === image || article.html.includes(encoded) || article.readerHtml?.includes(encoded))) return json(response, 404, { error: t(store.state.language, "err.imageMissing") });
       let result = images.get(image);
       if (!result) {
         const fetched = await fetchPublic(image, 0, undefined, store.state.language);

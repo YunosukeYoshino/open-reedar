@@ -92,6 +92,11 @@ const en = {
   "reader.sourceFeed": "Feed text only",
   "reader.feedOnlyNote": "This summary is based only on the feed text because the linked article could not be fetched.",
   "reader.usedChars": "{origin} · {count} chars used",
+  "reader.fetchArticle": "Fetch the full article",
+  "reader.readerView": "Reader view",
+  "reader.feedView": "Feed version",
+  "reader.fetchingArticle": "Fetching the article…",
+  "reader.caughtUp": "You're all caught up.",
 
   // AI panel
   "ai.panel": "Conversation with AI",
@@ -502,6 +507,11 @@ const ja: Record<MessageKey, string> = {
   "reader.sourceFeed": "フィード本文のみ",
   "reader.feedOnlyNote": "リンク先本文を取得できなかったため、フィード本文だけに基づく要約です。",
   "reader.usedChars": "{origin} · {count}文字を使用",
+  "reader.fetchArticle": "本文を取得",
+  "reader.readerView": "リーダー表示",
+  "reader.feedView": "フィードの表示",
+  "reader.fetchingArticle": "記事を取得しています…",
+  "reader.caughtUp": "すべて読み終えました",
 
   "ai.panel": "AIとの会話",
   "ai.closePanel": "AIパネルを閉じる",

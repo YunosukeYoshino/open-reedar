@@ -108,6 +108,7 @@ export class Engine {
       case "folder.save": this.store.saveFolder(action.id, action.name); break;
       case "folder.remove": this.store.removeFolder(action.id); break;
       case "article.read": this.store.article(action.id).read = action.read; break;
+      case "article.fetchText": return this.fetchArticleText(action.id);
       case "article.star": this.store.article(action.id).starred = action.starred; break;
       case "app.setLanguage": this.store.state.language = action.language; void this.refreshConnections(); break;
       case "opml.import": return this.importOpml(action.xml, action.urls, action.folders);
@@ -130,6 +131,15 @@ export class Engine {
       case "chat.summarize": return this.send(action.articleId, action.agent, this.t("prompt.summarize"), "summary");
       case "chat.stop": return this.stop(action.conversationId);
     }
+    await this.store.save();
+    this.changed();
+  }
+
+  private async fetchArticleText(id: string) {
+    const article = this.store.article(id);
+    const result = await this.dependencies.fetchArticleText(article.url, new AbortController().signal, this.store.state.language);
+    article.readerHtml = result.html;
+    article.readerText = result.text;
     await this.store.save();
     this.changed();
   }
