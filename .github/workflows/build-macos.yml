@@ -90,6 +90,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd release
+          gh release delete "$GITHUB_REF_NAME" --yes 2>/dev/null || true
           gh release create "$GITHUB_REF_NAME" --prerelease --generate-notes \
             --title "Reedar ${GITHUB_REF_NAME#v}" \
             *.dmg *.zip *.blockmap latest-mac.yml SHA256SUMS.txt
