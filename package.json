@@ -1,6 +1,6 @@
 {
   "name": "open-reedar",
-  "version": "0.2.1",
+  "version": "0.2.3",
   "license": "MIT",
   "private": true,
   "description": "A quiet RSS reader with your own coding agents.",
