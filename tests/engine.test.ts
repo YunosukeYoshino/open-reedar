@@ -208,6 +208,39 @@ describe("reading workflow", () => {
     await engine.close();
   });
 
+  test("previews OPML entries with resolutions and missing feeds without mutating state", async () => {
+    const { engine, store } = await setup("opml-preview", async () => {});
+    const extra = await parseFeed(xml, "https://example.net/rss", null);
+    store.mergeFeed(extra.feed, extra.articles);
+    const removed = await parseFeed(xml, "https://example.org/rss", null);
+    store.mergeFeed(removed.feed, removed.articles);
+    const removedFeed = store.state.feeds.find((feed) => feed.id === removed.feed.id);
+    if (!removedFeed) throw new Error("fixture missing");
+    removedFeed.removedAt = new Date().toISOString();
+    const opml = `<opml version="2.0"><body><outline text="F"><outline text="New" xmlUrl="https://example.dev/rss"/><outline text="Dup" xmlUrl="https://example.dev/rss"/><outline text="Existing" xmlUrl="https://example.com/rss"/><outline text="Removed" xmlUrl="https://example.org/rss"/><outline text="Private" xmlUrl="http://127.0.0.1/rss"/></outline></body></opml>`;
+    const before = structuredClone(store.state);
+    await engine.dispatch({ type: "opml.preview", xml: opml });
+    expect(engine.snapshot.opmlPreview?.entries.map((entry) => entry.resolution)).toEqual(["new", "inFileDuplicate", "duplicate", "restorable", "invalid"]);
+    expect(engine.snapshot.opmlPreview?.missingFeeds.map((feed) => feed.url)).toEqual(["https://example.net/rss"]);
+    expect(store.state).toEqual(before);
+    await engine.dispatch({ type: "opml.previewClear" });
+    expect(engine.snapshot.opmlPreview).toBeNull();
+    await engine.close();
+  });
+
+  test("imports only the URLs selected in the preview and clears it on completion", async () => {
+    const { engine, store } = await setup("opml-subset", async () => {});
+    const opml = `<opml version="2.0"><body><outline text="A" xmlUrl="https://a.example.com/rss"/><outline text="B" xmlUrl="https://b.example.com/rss"/></body></opml>`;
+    await engine.dispatch({ type: "opml.preview", xml: opml });
+    expect(engine.snapshot.opmlPreview?.missingFeeds.map((feed) => feed.url)).toEqual(["https://example.com/rss"]);
+    await engine.dispatch({ type: "opml.import", xml: opml, urls: ["https://b.example.com/rss"] });
+    await engine.settle();
+    expect(engine.snapshot.opmlImport?.results.map((result) => result.status)).toEqual(["imported"]);
+    expect(store.state.feeds.map((feed) => feed.url).sort()).toEqual(["https://b.example.com/rss", "https://example.com/rss"]);
+    expect(engine.snapshot.opmlPreview).toBeNull();
+    await engine.close();
+  });
+
   test("stopping an OPML import aborts retrieval and does not add late results", async () => {
     let started: (() => void) | undefined;
     const ready = new Promise<void>((resolve) => { started = resolve; });

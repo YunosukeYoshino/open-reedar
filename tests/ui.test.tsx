@@ -155,7 +155,14 @@ test("OPML controls upload a selected file, display per-feed results, and stop a
   const form = window.document.querySelector('#opml-dialog form');
   if (!(form instanceof window.HTMLFormElement)) throw new Error("Missing OPML form");
   await act(async () => form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true })));
-  expect(actions.at(-1)).toEqual({ type: "opml.import", xml });
+  expect(actions.at(-1)).toEqual({ type: "opml.preview", xml });
+  snapshot.opmlPreview = { entries: [{ url: "https://example.org/rss", title: "Imported", folderName: null, resolution: "new" }], missingFeeds: [] };
+  await act(async () => stream?.onmessage?.({ data: JSON.stringify({ type: "snapshot", snapshot }) }));
+  const apply = [...window.document.querySelectorAll('#opml-dialog button')].find((button) => button.textContent?.includes("を読み込む"));
+  if (!(apply instanceof window.HTMLButtonElement)) throw new Error("Missing OPML apply control");
+  await act(async () => apply.click());
+  expect(actions.at(-1)).toEqual({ type: "opml.import", xml, urls: ["https://example.org/rss"] });
+  delete snapshot.opmlPreview;
   snapshot.opmlImport = { status: "running", total: 3, results: [{ id: "duplicate", title: "Duplicate", url: "https://example.com/rss", status: "skipped", detail: "登録済みです。" }, { id: "blocked", title: "Blocked", url: "http://127.0.0.1/rss", status: "failed", detail: "公開HTTP/HTTPSのフィードURLではありません。" }] };
   await act(async () => stream?.onmessage?.({ data: JSON.stringify({ type: "snapshot", snapshot }) }));
   expect(window.document.querySelector('#opml-dialog')?.textContent).toContain("登録済みです。");
@@ -168,6 +175,49 @@ test("OPML controls upload a selected file, display per-feed results, and stop a
   const download = window.document.querySelector('#opml-dialog a[download]');
   expect(download?.getAttribute("href")).toBe("/api/opml");
   snapshot.opmlImport.status = "cancelled";
+  await act(async () => stream?.onmessage?.({ data: JSON.stringify({ type: "snapshot", snapshot }) }));
+});
+
+
+test("OPML preview applies only selected feeds and removes missing ones after confirmation", async () => {
+  const dialog = window.document.querySelector('#opml-dialog');
+  if (!(dialog instanceof window.HTMLElement)) throw new Error("Missing OPML dialog");
+  const input = dialog.querySelector('#opml-file');
+  const form = dialog.querySelector('form');
+  if (!(input instanceof window.HTMLInputElement) || !(form instanceof window.HTMLFormElement)) throw new Error("Missing OPML form");
+  const xml = '<opml version="2.0"><body><outline text="A" xmlUrl="https://a.example.com/rss"/><outline text="B" xmlUrl="https://b.example.com/rss"/></body></opml>';
+  Object.defineProperty(input, "files", { configurable: true, value: [new window.File([xml], "feeds.opml")] });
+  await act(async () => form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true })));
+  expect(actions.at(-1)).toEqual({ type: "opml.preview", xml });
+  snapshot.opmlPreview = {
+    entries: [
+      { url: "https://a.example.com/rss", title: "Feed A", folderName: "Tech", resolution: "new" },
+      { url: "https://b.example.com/rss", title: "Feed B", folderName: null, resolution: "new" },
+      { url: "https://example.com/rss", title: "Test feed", folderName: null, resolution: "duplicate" },
+    ],
+    missingFeeds: [{ id: "feed-missing", title: "Missing", url: "https://missing.example.com/rss", folderName: null }],
+  };
+  await act(async () => stream?.onmessage?.({ data: JSON.stringify({ type: "snapshot", snapshot }) }));
+  const boxes = [...dialog.querySelectorAll(".opml-preview > .opml-preview-list input[type=checkbox]")];
+  expect(boxes.map((box) => box instanceof window.HTMLInputElement ? [box.checked, box.disabled] : "not-input")).toEqual([[true, false], [true, false], [false, true]]);
+  const feedB = boxes[1];
+  if (!(feedB instanceof window.HTMLInputElement)) throw new Error("Missing checkbox");
+  await act(async () => feedB.click());
+  const apply = [...dialog.querySelectorAll("button")].find((button) => button.textContent?.includes("を読み込む"));
+  if (!(apply instanceof window.HTMLButtonElement)) throw new Error("Missing apply button");
+  await act(async () => apply.click());
+  expect(actions.at(-1)).toEqual({ type: "opml.import", xml, urls: ["https://a.example.com/rss"] });
+  const missingBox = dialog.querySelector(".opml-missing input[type=checkbox]");
+  if (!(missingBox instanceof window.HTMLInputElement)) throw new Error("Missing missing-feed checkbox");
+  await act(async () => missingBox.click());
+  const remove = [...dialog.querySelectorAll("button")].find((button) => button.textContent?.includes("件を削除"));
+  if (!(remove instanceof window.HTMLButtonElement)) throw new Error("Missing remove button");
+  await act(async () => remove.click());
+  const confirm = [...dialog.querySelectorAll("button")].find((button) => button.textContent === "削除する");
+  if (!(confirm instanceof window.HTMLButtonElement)) throw new Error("Missing confirm button");
+  await act(async () => confirm.click());
+  expect(actions.at(-1)).toEqual({ type: "feed.remove", id: "feed-missing" });
+  delete snapshot.opmlPreview;
   await act(async () => stream?.onmessage?.({ data: JSON.stringify({ type: "snapshot", snapshot }) }));
 });
 
