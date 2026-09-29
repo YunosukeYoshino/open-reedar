@@ -45,7 +45,7 @@ describe("reader persistence", () => {
   test("corrupt storage is never replaced with empty state", async () => {
     const path = join(directory, "corrupt.json");
     await writeFile(path, "{corrupt");
-    await expect(Store.open(path)).rejects.toThrow("元のファイルは保持");
+    await expect(Store.open(path)).rejects.toThrow("original file was kept");
     expect(await readFile(path, "utf8")).toBe("{corrupt");
   });
 

@@ -3,12 +3,26 @@ import { join, resolve } from "node:path";
 import { startServer } from "./server";
 import { publicUrl } from "./network";
 import { createDesktopUpdates } from "./desktop-updates";
+import { t } from "../shared/i18n";
+import type { Language } from "../shared/schema";
 
 app.setName("Reedar");
 let runtime: Awaited<ReturnType<typeof startServer>> | undefined;
 let quitting = false;
 let updates: Awaited<ReturnType<typeof createDesktopUpdates>> | undefined;
 let closing: Promise<void> | undefined;
+
+const language = (): Language => runtime?.engine.store.state.language ?? "en";
+
+function buildMenu() {
+  const lang = language();
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    { label: "Reedar", submenu: [{ role: "about" }, updates!.menuItem(), { type: "separator" }, { role: "hide" }, { role: "hideOthers" }, { type: "separator" }, { role: "quit" }] },
+    { label: t(lang, "menu.edit"), submenu: [{ role: "undo" }, { role: "redo" }, { type: "separator" }, { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" }] },
+    { label: t(lang, "menu.view"), submenu: [{ role: "reload" }, { role: "togglefullscreen" }, { role: "resetZoom" }, { role: "zoomIn" }, { role: "zoomOut" }] },
+    { label: t(lang, "menu.window"), submenu: [{ role: "minimize" }, { role: "zoom" }] },
+  ]));
+}
 
 function closeRuntime() { return closing ??= runtime?.close() ?? Promise.resolve(); }
 
@@ -40,17 +54,16 @@ else {
     updates = await createDesktopUpdates(window, async () => {
       await closeRuntime();
       quitting = true;
+    }, language);
+    buildMenu();
+    let menuLanguage = language();
+    runtime.engine.subscribe((update) => {
+      if (update.type === "snapshot" && update.snapshot.state.language !== menuLanguage) { menuLanguage = update.snapshot.state.language; buildMenu(); }
     });
-    Menu.setApplicationMenu(Menu.buildFromTemplate([
-      { label: "Reedar", submenu: [{ role: "about" }, updates.menuItem, { type: "separator" }, { role: "hide" }, { role: "hideOthers" }, { type: "separator" }, { role: "quit" }] },
-      { label: "編集", submenu: [{ role: "undo" }, { role: "redo" }, { type: "separator" }, { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" }] },
-      { label: "表示", submenu: [{ role: "reload" }, { role: "togglefullscreen" }, { role: "resetZoom" }, { role: "zoomIn" }, { role: "zoomOut" }] },
-      { label: "ウィンドウ", submenu: [{ role: "minimize" }, { role: "zoom" }] },
-    ]));
     await window.loadURL(runtime.url);
     updates.start();
   }).catch((error: unknown) => {
-    dialog.showErrorBox("Reedarを起動できませんでした", error instanceof Error ? error.message : "起動エラー");
+    dialog.showErrorBox(t(language(), "err.launchFailed"), error instanceof Error ? error.message : t(language(), "err.launchError"));
     app.quit();
   });
   app.on("window-all-closed", () => app.quit());

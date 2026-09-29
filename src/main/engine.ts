@@ -3,13 +3,15 @@ import { mkdir } from "node:fs/promises";
 import { z } from "zod";
 import type { Action, Agent, CliInstall, Connection, Conversation, OpmlImport, OpmlPreview, OrganizeJob, Snapshot, Update } from "../shared/schema";
 import { agentSchema, codexModel } from "../shared/schema";
-import { agentError, AuthenticationRequired, connection, runOrganizer, runReader } from "./agents/reader";
+import { agentError, AuthenticationRequired, connection, LocalizedError, runOrganizer, runReader } from "./agents/reader";
 import { loadArticleText } from "./article-text";
 import { loadFeed } from "./feeds";
 import { parseOpml } from "./opml";
 import { publicUrl } from "./network";
 import { Store } from "./store";
 import { installCli } from "./cli-install";
+import { defaultLanguage, t } from "../shared/i18n";
+import type { MessageKey } from "../shared/i18n";
 
 type Dependencies = { fetchArticleText: typeof loadArticleText; fetchFeed: typeof loadFeed; run: typeof runReader; connect: typeof connection; organize: typeof runOrganizer };
 const defaults: Dependencies = { fetchArticleText: loadArticleText, fetchFeed: loadFeed, run: runReader, connect: connection, organize: runOrganizer };
@@ -20,7 +22,7 @@ const organizeResponseSchema = z.object({
 });
 
 export class Engine {
-  connections: Connection[] = agentSchema.options.map((agent) => ({ agent, installed: false, status: "checking", detail: "接続を確認しています" }));
+  connections: Connection[] = agentSchema.options.map((agent) => ({ agent, installed: false, status: "checking", detail: t(defaultLanguage, "conn.checking") }));
   refreshing = false;
   opmlImport: OpmlImport | null = null;
   opmlPreview: OpmlPreview | null = null;
@@ -48,35 +50,42 @@ export class Engine {
   private emit(update: Update) { for (const listener of this.listeners) listener(update); }
   private changed() { this.emit({ type: "snapshot", snapshot: this.snapshot }); }
 
+  private t(key: MessageKey, params?: Record<string, string | number>) { return t(this.store.state.language, key, params); }
+
   private async installCli() {
     this.cliInstall = await installCli();
     this.changed();
   }
 
+  private connectionProbe = 0;
+
   async refreshConnections() {
-    this.connections = await Promise.all(agentSchema.options.map((agent) => this.dependencies.connect(agent, this.runnerDirectory)));
+    const generation = ++this.connectionProbe;
+    const connections = await Promise.all(agentSchema.options.map((agent) => this.dependencies.connect(agent, this.runnerDirectory, this.store.state.language)));
+    if (generation !== this.connectionProbe) return;
+    this.connections = connections;
     this.changed();
   }
 
   async dispatch(action: Action) {
     switch (action.type) {
       case "feed.add": {
-        const url = publicUrl(action.url).href;
+        const url = publicUrl(action.url, this.store.state.language).href;
         const existing = this.store.state.feeds.find((feed) => feed.url === url);
         if (existing?.removedAt) {
           existing.folderId = this.store.folder(action.folderId);
           delete existing.removedAt;
           break;
         }
-        if (existing) throw new Error("このフィードは登録済みです。");
-        const result = await this.dependencies.fetchFeed(url, this.store.folder(action.folderId));
+        if (existing) throw new Error(this.t("err.feedExists"));
+        const result = await this.dependencies.fetchFeed(url, this.store.folder(action.folderId), undefined, this.store.state.language);
         this.store.mergeFeed(result.feed, result.articles);
         break;
       }
       case "feed.remove":
       case "feed.restore": {
         const feed = this.store.state.feeds.find((item) => item.id === action.id);
-        if (!feed) throw new Error("フィードが見つかりません。");
+        if (!feed) throw new Error(this.t("err.feedMissing"));
         if (action.type === "feed.restore") delete feed.removedAt;
         else {
           feed.removedAt = new Date().toISOString();
@@ -92,7 +101,7 @@ export class Engine {
       }
       case "feed.move": {
         const feed = this.store.state.feeds.find((item) => item.id === action.id);
-        if (!feed) throw new Error("フィードが見つかりません。");
+        if (!feed) throw new Error(this.t("err.feedMissing"));
         feed.folderId = this.store.folder(action.folderId);
         break;
       }
@@ -100,6 +109,7 @@ export class Engine {
       case "folder.remove": this.store.removeFolder(action.id); break;
       case "article.read": this.store.article(action.id).read = action.read; break;
       case "article.star": this.store.article(action.id).starred = action.starred; break;
+      case "app.setLanguage": this.store.state.language = action.language; void this.refreshConnections(); break;
       case "opml.import": return this.importOpml(action.xml, action.urls, action.folders);
       case "opml.preview": return this.previewOpml(action.xml);
       case "opml.previewClear": this.opmlPreview = null; this.changed(); return;
@@ -108,7 +118,7 @@ export class Engine {
       case "organize.apply": this.applyOrganize(action.moves, action.assignments); break;
       case "organize.cancel": this.organizeRun?.controller.abort(); this.organize = null; this.changed(); return;
       case "organize.clear": {
-        if (this.organizeRun) throw new Error("整理案の生成は実行中です。");
+        if (this.organizeRun) throw new Error(this.t("err.organizeRunning"));
         this.organize = null;
         this.changed();
         return;
@@ -117,7 +127,7 @@ export class Engine {
       case "connections.refresh": return this.refreshConnections();
       case "cli.install": return this.installCli();
       case "chat.send": return this.send(action.articleId, action.agent, action.text);
-      case "chat.summarize": return this.send(action.articleId, action.agent, "この記事の要点と結論を日本語で簡潔に要約してください。重要な事実と背景を含め、本文にない推測は避けてください。", "summary");
+      case "chat.summarize": return this.send(action.articleId, action.agent, this.t("prompt.summarize"), "summary");
       case "chat.stop": return this.stop(action.conversationId);
     }
     await this.store.save();
@@ -126,7 +136,7 @@ export class Engine {
 
   private async previewOpml(xml: string) {
     let parsed;
-    try { parsed = await parseOpml(xml); }
+    try { parsed = await parseOpml(xml, this.store.state.language); }
     catch (error) { this.opmlPreview = null; this.changed(); throw error; }
     const seen = new Set<string>();
     const opmlUrls = new Set<string>();
@@ -136,15 +146,15 @@ export class Engine {
       const base = { url: entry.url, title: entry.title, folderName: entry.folderName };
       let url: string | undefined;
       try { url = publicUrl(entry.url).href; }
-      catch { entries.push({ ...base, resolution: "invalid", detail: "公開HTTP/HTTPSのフィードURLではありません。" }); continue; }
-      if (seen.has(url)) { entries.push({ ...base, resolution: "inFileDuplicate", detail: "OPML内で重複しています。" }); continue; }
+      catch { entries.push({ ...base, resolution: "invalid", detail: this.t("err.invalidFeedUrl") }); continue; }
+      if (seen.has(url)) { entries.push({ ...base, resolution: "inFileDuplicate", detail: this.t("err.opmlDuplicate") }); continue; }
       seen.add(url);
       opmlUrls.add(url);
       const existing = this.store.state.feeds.find((feed) => feed.url === url);
-      if (existing && !existing.removedAt) { entries.push({ ...base, resolution: "duplicate", detail: "登録済みです。" }); continue; }
-      if (existing) { entries.push({ ...base, resolution: "restorable", detail: "削除済み。復元できます。" }); continue; }
-      if (entry.folderName && entry.folderName.length > 60) { entries.push({ ...base, resolution: "invalid", detail: "フォルダ名を60文字以内にしてください。" }); continue; }
-      entries.push({ ...base, resolution: "new", detail: entry.folderName && !folders.some((folder) => folder.name === entry.folderName) ? `フォルダ「${entry.folderName}」を作成します。` : undefined });
+      if (existing && !existing.removedAt) { entries.push({ ...base, resolution: "duplicate", detail: this.t("err.registered") }); continue; }
+      if (existing) { entries.push({ ...base, resolution: "restorable", detail: this.t("err.restorable") }); continue; }
+      if (entry.folderName && entry.folderName.length > 60) { entries.push({ ...base, resolution: "invalid", detail: this.t("err.folderNameLong") }); continue; }
+      entries.push({ ...base, resolution: "new", detail: entry.folderName && !folders.some((folder) => folder.name === entry.folderName) ? this.t("err.folderCreate", { name: entry.folderName }) : undefined });
     }
     const missingFeeds = this.store.state.feeds
       .filter((feed) => !feed.removedAt && !opmlUrls.has(feed.url))
@@ -154,11 +164,11 @@ export class Engine {
   }
 
   private async importOpml(xml: string, urls?: string[], folders?: Record<string, string>) {
-    if (this.importJob) throw new Error("OPMLの読み込みは実行中です。");
+    if (this.importJob) throw new Error(this.t("err.importRunning"));
     const selected = urls ? new Set(urls) : null;
-    const entries = (await parseOpml(xml)).map((entry) => ({ ...entry, folderName: folders?.[entry.url] ?? entry.folderName }))
+    const entries = (await parseOpml(xml, this.store.state.language)).map((entry) => ({ ...entry, folderName: folders?.[entry.url] ?? entry.folderName }))
       .filter((entry) => !selected || selected.has(entry.url));
-    if (this.importJob) throw new Error("OPMLの読み込みは実行中です。");
+    if (this.importJob) throw new Error(this.t("err.importRunning"));
     const report: OpmlImport = { status: "running", total: entries.length, results: [] };
     this.opmlImport = report;
     this.changed();
@@ -173,18 +183,18 @@ export class Engine {
             try {
               let url: string;
               try { url = publicUrl(entry.url).href; }
-              catch { report.results.push({ ...item, status: "failed", detail: "公開HTTP/HTTPSのフィードURLではありません。" }); return; }
-              if (seen.has(url)) { report.results.push({ ...item, status: "skipped", detail: "OPML内で重複しています。" }); return; }
+              catch { report.results.push({ ...item, status: "failed", detail: this.t("err.invalidFeedUrl") }); return; }
+              if (seen.has(url)) { report.results.push({ ...item, status: "skipped", detail: this.t("err.opmlDuplicate") }); return; }
               seen.add(url);
               const existing = this.store.state.feeds.find((feed) => feed.url === url);
-              if (existing && !existing.removedAt) { report.results.push({ ...item, status: "skipped", detail: "登録済みです。" }); return; }
-              if (entry.folderName && entry.folderName.length > 60) { report.results.push({ ...item, status: "failed", detail: "フォルダ名を60文字以内にしてください。" }); return; }
+              if (existing && !existing.removedAt) { report.results.push({ ...item, status: "skipped", detail: this.t("err.registered") }); return; }
+              if (entry.folderName && entry.folderName.length > 60) { report.results.push({ ...item, status: "failed", detail: this.t("err.folderNameLong") }); return; }
               const removedAt = existing?.removedAt;
-              const result = existing ? { feed: existing, articles: [] } : await this.dependencies.fetchFeed(url, null, controller.signal);
+              const result = existing ? { feed: existing, articles: [] } : await this.dependencies.fetchFeed(url, null, controller.signal, this.store.state.language);
               if (controller.signal.aborted) return;
               const current = this.store.state.feeds.find((feed) => feed.url === url);
               if (current && (!current.removedAt || current.removedAt !== removedAt)) {
-                report.results.push({ ...item, status: "skipped", detail: "読み込み中に登録状態が変更されました。" }); return;
+                report.results.push({ ...item, status: "skipped", detail: this.t("err.changedWhileImporting") }); return;
               }
               let folderId: string | null = null;
               if (entry.folderName) {
@@ -194,16 +204,16 @@ export class Engine {
               }
               this.store.mergeFeed({ ...result.feed, title: entry.title || result.feed.title, folderId, removedAt: undefined }, result.articles);
               await this.store.save();
-              report.results.push({ ...item, status: "imported", detail: existing ? "復元しました。" : "登録しました。" });
+              report.results.push({ ...item, status: "imported", detail: existing ? this.t("err.restored") : this.t("err.imported") });
             } catch {
-              if (!controller.signal.aborted) report.results.push({ ...item, status: "failed", detail: "フィードを取得・保存できませんでした。URLと接続を確認してください。" });
+              if (!controller.signal.aborted) report.results.push({ ...item, status: "failed", detail: this.t("err.fetchSaveFailed") });
             } finally { this.changed(); }
           }));
         }
         report.status = controller.signal.aborted ? "cancelled" : "completed";
       } catch {
         report.status = "failed";
-        report.error = "OPMLの読み込みを完了できませんでした。登録済みのフィードは保持されています。";
+        report.error = this.t("err.importFailed");
       } finally { this.importJob = undefined; this.opmlPreview = null; this.changed(); }
     })();
     this.importJob = { controller, done };
@@ -211,9 +221,9 @@ export class Engine {
   }
 
   private proposeOrganize(agent: Agent, scope: OrganizeJob["scope"]) {
-    if (this.organizeRun) throw new Error("整理案の生成は実行中です。");
+    if (this.organizeRun) throw new Error(this.t("err.organizeRunning"));
     if (scope === "opml" && !this.opmlPreview?.entries.some((entry) => entry.resolution === "new" || entry.resolution === "restorable")) {
-      throw new Error("先にOPMLのプレビューを作成してください。");
+      throw new Error(this.t("err.organizeNeedPreview"));
     }
     const startedAt = new Date().toISOString();
     const prompt = this.organizePrompt(scope);
@@ -225,12 +235,12 @@ export class Engine {
       try {
         await this.dependencies.organize(agent, prompt, this.runnerDirectory, controller.signal, (event) => {
           if (!controller.signal.aborted && event.type === "delta") text = event.text;
-        });
+        }, this.store.state.language);
         if (controller.signal.aborted) return;
         this.organize = { scope, agent, status: "completed", startedAt, plan: this.organizePlan(scope, text) };
       } catch (error) {
         this.organize = controller.signal.aborted ? null
-          : { scope, agent, status: "failed", startedAt, detail: agentError(error) };
+          : { scope, agent, status: "failed", startedAt, detail: agentError(error, this.store.state.language) };
       } finally { this.organizeRun = undefined; this.changed(); }
     })();
     this.organizeRun = { controller, done };
@@ -243,14 +253,14 @@ export class Engine {
       const entries = (this.opmlPreview?.entries ?? [])
         .filter((entry) => entry.resolution === "new" || entry.resolution === "restorable")
         .map((entry) => ({ url: entry.url, title: entry.title, folder: entry.folderName }));
-      return JSON.stringify({ task: "OPMLで取り込むフィードにフォルダを割り当てる案を作成してください。", folders, entries });
+      return JSON.stringify({ task: this.t("prompt.organizeOpml"), folders, entries });
     }
     const feeds = this.store.state.feeds.filter((feed) => !feed.removedAt).map((feed) => ({
       id: feed.id, title: feed.title, url: feed.url,
       folder: this.store.state.folders.find((folder) => folder.id === feed.folderId)?.name ?? null,
       recent: this.store.state.articles.filter((article) => article.feedId === feed.id).slice(0, 3).map((article) => article.title),
     }));
-    return JSON.stringify({ task: "フィードをテーマ別のフォルダに整理する案を作成してください。", folders, feeds });
+    return JSON.stringify({ task: this.t("prompt.organizeLibrary"), folders, feeds });
   }
 
   private organizePlan(scope: OrganizeJob["scope"], text: string): NonNullable<OrganizeJob["plan"]> {
@@ -259,7 +269,7 @@ export class Engine {
       const start = text.indexOf("{");
       const end = text.lastIndexOf("}");
       parsed = organizeResponseSchema.parse(JSON.parse(start >= 0 && end > start ? text.slice(start, end + 1) : text));
-    } catch { throw new Error("整理案を解釈できませんでした。もう一度お試しください。"); }
+    } catch { throw new LocalizedError(this.t("err.organizeParse")); }
     const folders = this.store.state.folders;
     const plan: NonNullable<OrganizeJob["plan"]> = { moves: [], assignments: [] };
     if (scope === "opml") {
@@ -287,17 +297,17 @@ export class Engine {
 
   private applyOrganize(moves?: { feedId: string; folderName: string }[], assignments?: { url: string; folderName: string }[]) {
     const job = this.organize;
-    if (!job || job.status !== "completed" || !job.plan) throw new Error("適用できる整理案がありません。");
+    if (!job || job.status !== "completed" || !job.plan) throw new Error(this.t("err.organizeNothing"));
     if (job.scope === "opml") {
       const preview = this.opmlPreview;
-      if (!preview) throw new Error("プレビューがありません。");
+      if (!preview) throw new Error(this.t("err.noPreview"));
       const folders = this.store.state.folders;
       for (const item of assignments ?? []) {
         const folderName = item.folderName.trim();
         const entry = preview.entries.find((e) => e.url === item.url && (e.resolution === "new" || e.resolution === "restorable"));
         if (!entry || !folderName || folderName.length > 60) continue;
         entry.folderName = folderName;
-        entry.detail = folders.some((f) => f.name === folderName) ? undefined : `フォルダ「${folderName}」を作成します。`;
+        entry.detail = folders.some((f) => f.name === folderName) ? undefined : this.t("err.folderCreate", { name: folderName });
       }
       this.organize = null;
       return;
@@ -322,12 +332,12 @@ export class Engine {
       for (let offset = 0; offset < feeds.length; offset += 4) {
         await Promise.all(feeds.slice(offset, offset + 4).map(async (feed) => {
           try {
-            const result = await this.dependencies.fetchFeed(feed.url, feed.folderId);
+            const result = await this.dependencies.fetchFeed(feed.url, feed.folderId, undefined, this.store.state.language);
             const current = this.store.state.feeds.find((item) => item.id === feed.id);
             if (current && !current.removedAt) this.store.mergeFeed({ ...result.feed, folderId: current.folderId }, result.articles);
           } catch (error) {
             const current = this.store.state.feeds.find((item) => item.id === feed.id);
-            if (current) current.error = error instanceof Error ? error.message : "更新できませんでした。";
+            if (current) current.error = error instanceof Error ? error.message : this.t("err.updateFailed");
           }
         }));
         await this.store.save();
@@ -337,7 +347,7 @@ export class Engine {
 
   private async send(articleId: string, agent: Conversation["agent"], text: string, purpose: "chat" | "summary" = "chat") {
     const article = this.store.article(articleId);
-    if (this.store.state.feeds.find((feed) => feed.id === article.feedId)?.removedAt) throw new Error("削除済みのフィードです。復元してから質問してください。");
+    if (this.store.state.feeds.find((feed) => feed.id === article.feedId)?.removedAt) throw new Error(this.t("err.removedFeed"));
     let conversation = this.store.state.conversations.find((item) => item.articleId === articleId && item.agent === agent);
     if (!conversation) {
       conversation = {
@@ -346,8 +356,8 @@ export class Engine {
       };
       this.store.state.conversations.push(conversation);
     }
-    if (this.jobs.has(conversation.id)) throw new Error("この会話は実行中です。完了を待つか停止してください。");
-    if (this.jobs.size >= 2) throw new Error("同時に実行できる会話は2件です。完了を待ってください。");
+    if (this.jobs.has(conversation.id)) throw new Error(this.t("err.conversationRunning"));
+    if (this.jobs.size >= 2) throw new Error(this.t("err.tooManyConversations"));
     const history = structuredClone(conversation.messages);
     const now = new Date().toISOString();
     const message: Extract<Conversation["messages"][number], { role: "assistant" }> = {
@@ -367,19 +377,19 @@ export class Engine {
         this.changed();
         if (current.source.origin !== "web") {
           try {
-            const source = await this.dependencies.fetchArticleText(article.url, controller.signal);
+            const source = await this.dependencies.fetchArticleText(article.url, controller.signal, this.store.state.language);
             controller.signal.throwIfAborted();
             if (source.text.trim().length < current.source.text.trim().length) throw new Error("Extracted body is shorter than the feed");
             if (history.length && !current.previousSource) current.previousSource = structuredClone(current.source);
             current.source = { title: article.title, url: source.url, text: source.text, capturedAt: new Date().toISOString(), origin: "web" };
           } catch {
             controller.signal.throwIfAborted();
-            current.source = { ...current.source, origin: "feed", fetchError: "リンク先本文を取得できなかったため、フィード本文のみを使用しています。" };
+            current.source = { ...current.source, origin: "feed", fetchError: this.t("err.feedTextOnly") };
           }
         }
         controller.signal.throwIfAborted();
         if (!current.source.text.trim()) {
-          message.state = { status: "failed", error: "記事本文を取得できませんでした。原文を開いて確認してください。" };
+          message.state = { status: "failed", error: this.t("err.fetchArticleFailed") };
           return;
         }
         message.sourceOrigin = current.source.origin;
@@ -392,12 +402,12 @@ export class Engine {
           if (event.type === "delta") { message.text = event.text; message.state = { status: "running" }; }
           else message.state = { status: "waiting", reason: event.reason };
           notify();
-        });
+        }, this.store.state.language);
         if (!controller.signal.aborted) message.state = { status: "completed" };
       } catch (error) {
         message.state = controller.signal.aborted ? { status: "cancelled" }
           : error instanceof AuthenticationRequired ? { status: "waiting", reason: error.message }
-          : { status: "failed", error: agentError(error) };
+          : { status: "failed", error: agentError(error, this.store.state.language) };
       } finally {
         if (notifyTimer) clearTimeout(notifyTimer);
         try { await this.store.save(); }

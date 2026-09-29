@@ -3,8 +3,9 @@ import { decode } from "html-entities";
 import Parser from "rss-parser";
 import sanitizeHtml from "sanitize-html";
 import { z } from "zod";
-import type { Article, Feed } from "../shared/schema";
+import type { Article, Feed, Language } from "../shared/schema";
 import { fetchPublic, publicUrl } from "./network";
+import { t } from "../shared/i18n";
 
 const optionalText = z.string().optional().catch(undefined);
 const parsedFeedSchema = z.object({
@@ -51,20 +52,22 @@ export function cleanArticle(html: string, base: string) {
   return { html: clean, text: plainText(clean), imageUrl };
 }
 
-const notAFeedMessage = "RSS/Atomとして読み込めませんでした。WebサイトではなくフィードのURLを入力してください。";
+export class FeedUserError extends Error {}
 
-export async function parseFeed(xml: string, url: string, folderId: string | null, now = new Date().toISOString()) {
-  if (/^\s*(<!doctype\s+html|<html[\s>])/i.test(xml)) throw new Error(notAFeedMessage);
-  if (/<!DOCTYPE|<!ENTITY/i.test(xml)) throw new Error("外部エンティティを含むXMLには対応していません。");
+export async function parseFeed(xml: string, url: string, folderId: string | null, now = new Date().toISOString(), lang: Language = "en") {
+  if (/^\s*(<!doctype\s+html|<html[\s>])/i.test(xml)) throw new FeedUserError(t(lang, "err.notAFeed"));
+  if (/<!DOCTYPE|<!ENTITY/i.test(xml)) throw new FeedUserError(t(lang, "err.entityXml"));
   const parsed = parsedFeedSchema.parse(await parser.parseString(xml));
   const feedId = hash(url);
   const feed: Feed = { id: feedId, url, title: plainText(parsed.title ?? "") || new URL(url).hostname, siteUrl: safeLink(parsed.link, url) || url, folderId, updatedAt: now, error: null };
   const articles: Article[] = parsed.items.map((item) => {
     const link = safeLink(item.link, url);
-    const title = plainText(item.title ?? "") || "タイトルなし";
+    const text = plainText(item.title ?? "");
+    const title = text || t(lang, "err.noTitle");
     const body = cleanArticle(item["content:encoded"] || item.content || item.summary || "", link || url);
     const published = new Date(item.isoDate || item.pubDate || now);
-    const identity = item.guid || item.id || link || `${title}:${item.isoDate || item.pubDate || ""}`;
+    // The identity seed keeps the legacy untranslated fallback so article ids survive language changes and upgrades.
+    const identity = item.guid || item.id || link || `${text || "タイトルなし"}:${item.isoDate || item.pubDate || ""}`;
     return {
       id: hash(`${feedId}:${identity}`), feedId, title, url: link || feed.siteUrl,
       author: plainText(item.creator || item.author || ""),
@@ -84,12 +87,12 @@ export function decodeBody(body: Buffer, contentType: string) {
   catch { return body.toString("utf8"); }
 }
 
-export async function loadFeed(url: string, folderId: string | null, signal?: AbortSignal) {
-  const result = await fetchPublic(url, 0, signal);
+export async function loadFeed(url: string, folderId: string | null, signal?: AbortSignal, lang: Language = "en") {
+  const result = await fetchPublic(url, 0, signal, lang);
   const xml = decodeBody(result.body, result.contentType);
-  try { return await parseFeed(xml, url, folderId); }
+  try { return await parseFeed(xml, url, folderId, undefined, lang); }
   catch (error) {
-    if (error instanceof Error && (error.message === notAFeedMessage || error.message.includes("外部エンティティ"))) throw error;
-    throw new Error(notAFeedMessage, { cause: error });
+    if (error instanceof FeedUserError) throw error;
+    throw new FeedUserError(t(lang, "err.notAFeed"), { cause: error });
   }
 }

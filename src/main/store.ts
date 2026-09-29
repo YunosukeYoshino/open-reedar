@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { stateSchema } from "../shared/schema";
-import type { Article, Feed, ReaderState } from "../shared/schema";
+import type { Article, Feed, Language, ReaderState } from "../shared/schema";
+import { t } from "../shared/i18n";
 
 export class Store {
   state: ReaderState;
@@ -19,14 +20,14 @@ export class Store {
       state = stateSchema.parse(JSON.parse(await readFile(path, "utf8")));
     } catch (error) {
       if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
-        throw new Error("保存データを読み込めませんでした。元のファイルは保持されています。", { cause: error });
+        throw new Error(t("en", "err.storeUnreadable"), { cause: error });
       }
-      state = { version: 1, folders: [], feeds: [], articles: [], conversations: [] };
+      state = { version: 1, folders: [], feeds: [], articles: [], conversations: [], language: "en" };
     }
     for (const conversation of state.conversations) {
       for (const message of conversation.messages) {
         if (message.role === "assistant" && ["running", "waiting"].includes(message.state.status)) {
-          message.state = { status: "failed", error: "前回の実行中にアプリが終了しました。もう一度質問を送信できます。" };
+          message.state = { status: "failed", error: t(state.language, "err.interrupted") };
         }
       }
     }
@@ -46,33 +47,33 @@ export class Store {
     return write;
   }
 
-  article(id: string) {
+  article(id: string, lang: Language = this.state.language) {
     const article = this.state.articles.find((item) => item.id === id);
-    if (!article) throw new Error("記事が見つかりません。");
+    if (!article) throw new Error(t(lang, "err.articleMissing"));
     return article;
   }
 
-  folder(id: string | null) {
+  folder(id: string | null, lang: Language = this.state.language) {
     if (id !== null && !this.state.folders.some((folder) => folder.id === id)) {
-      throw new Error("フォルダが見つかりません。");
+      throw new Error(t(lang, "err.folderMissing"));
     }
     return id;
   }
 
-  saveFolder(id: string | null, name: string) {
+  saveFolder(id: string | null, name: string, lang: Language = this.state.language) {
     if (this.state.folders.some((folder) => folder.name === name && folder.id !== id)) {
-      throw new Error("同じ名前のフォルダがあります。");
+      throw new Error(t(lang, "err.folderDuplicate"));
     }
     if (id === null) this.state.folders.push({ id: randomUUID(), name });
     else {
       const folder = this.state.folders.find((item) => item.id === id);
-      if (!folder) throw new Error("フォルダが見つかりません。");
+      if (!folder) throw new Error(t(lang, "err.folderMissing"));
       folder.name = name;
     }
   }
 
-  removeFolder(id: string) {
-    if (!this.state.folders.some((folder) => folder.id === id)) throw new Error("フォルダが見つかりません。");
+  removeFolder(id: string, lang: Language = this.state.language) {
+    if (!this.state.folders.some((folder) => folder.id === id)) throw new Error(t(lang, "err.folderMissing"));
     for (const feed of this.state.feeds) {
       if (feed.folderId === id) feed.folderId = null;
     }

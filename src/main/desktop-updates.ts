@@ -8,6 +8,8 @@ import { promisify } from "node:util";
 import { AppUpdates, newestRelease } from "./updates";
 import type { UpdateNotice } from "./updates";
 import { fetchPublic } from "./network";
+import { t } from "../shared/i18n";
+import type { Language } from "../shared/schema";
 
 const releasePage = "https://github.com/YunosukeYoshino/open-reedar/releases";
 const exec = promisify(execFile);
@@ -20,18 +22,18 @@ async function supportsAutomaticInstall() {
   } catch { return false; }
 }
 
-function noticeOptions(notice: UpdateNotice): MessageBoxOptions {
-  const base = { title: "Reedarのアップデート", type: "info" as const, noLink: true };
+function noticeOptions(notice: UpdateNotice, lang: Language): MessageBoxOptions {
+  const base = { title: t(lang, "update.title"), type: "info" as const, noLink: true };
   switch (notice.kind) {
-    case "available": return { ...base, message: `Reedar ${notice.version} が利用できます`, detail: "このプレビュー版は自動インストールに対応していません。リリースページから新版をダウンロードして入れ替えてください。記事と会話は引き継がれます。", buttons: ["ダウンロードページを開く", "あとで"], defaultId: 0, cancelId: 1 };
-    case "ready": return { ...base, message: `Reedar ${notice.version} の準備ができました`, detail: "再起動して更新できます。実行中のAI応答とOPMLの取り込みは停止して保存します。「あとで」を選ぶと、次にアプリを終了したあとに更新が適用されます。", buttons: ["再起動して更新", "あとで"], defaultId: 1, cancelId: 1 };
-    case "current": return { ...base, message: `Reedar ${notice.version} は最新です`, detail: "このMac向けの新しい公開版・プレリリースはありません。", buttons: ["OK"] };
-    case "development": return { ...base, message: "アップデートは配布版で利用できます", detail: "開発中のアプリは自動更新しません。", buttons: ["OK"] };
-    case "error": return { ...base, type: "error", message: notice.stage === "check" ? "アップデートを確認できませんでした" : notice.stage === "download" ? "更新ファイルを取得・検証できませんでした" : "更新を適用できませんでした", detail: "時間をおいて再度お試しください。リリースページから手動でダウンロードすることもできます。", buttons: ["リリースページを開く", "閉じる"], defaultId: 1, cancelId: 1 };
+    case "available": return { ...base, message: t(lang, "update.available", { version: notice.version }), detail: t(lang, "update.availableDetail"), buttons: [t(lang, "update.openDownload"), t(lang, "update.later")], defaultId: 0, cancelId: 1 };
+    case "ready": return { ...base, message: t(lang, "update.ready", { version: notice.version }), detail: t(lang, "update.readyDetail"), buttons: [t(lang, "update.restart"), t(lang, "update.later")], defaultId: 1, cancelId: 1 };
+    case "current": return { ...base, message: t(lang, "update.current", { version: notice.version }), detail: t(lang, "update.currentDetail"), buttons: [t(lang, "update.ok")] };
+    case "development": return { ...base, message: t(lang, "update.development"), detail: t(lang, "update.developmentDetail"), buttons: [t(lang, "update.ok")] };
+    case "error": return { ...base, type: "error", message: t(lang, notice.stage === "check" ? "update.checkFailed" : notice.stage === "download" ? "update.downloadFailed" : "update.applyFailed"), detail: t(lang, "update.errorDetail"), buttons: [t(lang, "update.openRelease"), t(lang, "update.close")], defaultId: 1, cancelId: 1 };
   }
 }
 
-export async function createDesktopUpdates(window: BrowserWindow, prepareToInstall: () => Promise<void>) {
+export async function createDesktopUpdates(window: BrowserWindow, prepareToInstall: () => Promise<void>, language: () => Language) {
   const lifetime = new AbortController();
   const packagedMac = app.isPackaged && process.platform === "darwin";
   const automatic = packagedMac && await supportsAutomaticInstall();
@@ -90,7 +92,7 @@ export async function createDesktopUpdates(window: BrowserWindow, prepareToInsta
     notice: async (notice) => {
       if (window.isDestroyed()) return false;
       try {
-        const result = await dialog.showMessageBox(window, noticeOptions(notice));
+        const result = await dialog.showMessageBox(window, noticeOptions(notice, language()));
         if (notice.kind === "error" && result.response === 0) { await openRelease(); return false; }
         return ["available", "ready"].includes(notice.kind) && result.response === 0;
       } catch { return false; }
@@ -102,11 +104,16 @@ export async function createDesktopUpdates(window: BrowserWindow, prepareToInsta
       const state = updates.state;
       if (item) {
         item.enabled = !updates.busy;
-        item.label = state.kind === "checking" ? "アップデートを確認中…" : state.kind === "downloading" ? `更新をダウンロード中… ${Math.floor(state.percent)}%` : state.kind === "installing" ? "更新を適用中…" : state.kind === "ready" ? `再起動して ${state.version} に更新…` : state.kind === "available" ? `${state.version} をダウンロード…` : "アップデートを確認…";
+        item.label = menuLabel();
       }
       if (!window.isDestroyed()) window.setProgressBar(state.kind === "downloading" ? state.percent / 100 : -1);
     },
   });
-  const menuItem: MenuItemConstructorOptions = { id: "check-updates", label: "アップデートを確認…", click: () => { void updates.check(true); } };
+  const menuLabel = () => {
+    const lang = language();
+    const state = updates.state;
+    return state.kind === "checking" ? t(lang, "update.menuChecking") : state.kind === "downloading" ? t(lang, "update.menuDownloading", { percent: Math.floor(state.percent) }) : state.kind === "installing" ? t(lang, "update.menuInstalling") : state.kind === "ready" ? t(lang, "update.menuReady", { version: state.version }) : state.kind === "available" ? t(lang, "update.menuAvailable", { version: state.version }) : t(lang, "update.menuCheck");
+  };
+  const menuItem = (): MenuItemConstructorOptions => ({ id: "check-updates", label: menuLabel(), enabled: !updates.busy, click: () => { void updates.check(true); } });
   return { menuItem, start: () => updates.start(), dispose: () => updates.dispose() };
 }

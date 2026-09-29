@@ -70,12 +70,16 @@ export const conversationSchema = z.object({
 });
 export type Conversation = z.infer<typeof conversationSchema>;
 
+export const languageSchema = z.enum(["en", "ja"]);
+export type Language = z.infer<typeof languageSchema>;
+
 export const stateSchema = z.object({
   version: z.literal(1),
   folders: z.array(folderSchema),
   feeds: z.array(feedSchema),
   articles: z.array(articleSchema),
   conversations: z.array(conversationSchema),
+  language: languageSchema.default("en"),
 });
 export type ReaderState = z.infer<typeof stateSchema>;
 
@@ -165,5 +169,6 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("chat.send"), articleId: z.string(), agent: agentSchema, text: z.string().trim().min(1).max(4000) }),
   z.object({ type: z.literal("chat.summarize"), articleId: z.string(), agent: agentSchema }),
   z.object({ type: z.literal("chat.stop"), conversationId: z.string() }),
+  z.object({ type: z.literal("app.setLanguage"), language: languageSchema }),
 ]);
 export type Action = z.infer<typeof actionSchema>;
