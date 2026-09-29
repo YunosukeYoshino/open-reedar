@@ -25,6 +25,7 @@ Bring your own CLI login. Reedar uses the agent's existing service access and us
 - **Conversations that stay with the article:** local history includes a snapshot of the source text used for the conversation.
 - **Clear execution states:** running, waiting, completed, failed, and cancelled, with a stop control that preserves partial answers.
 - **Keyboard navigation:** move through articles and manage reading state without leaving the keyboard.
+- **Terminal and agent harnesses:** a `reedar` CLI lists feeds with unread status, browses and prints articles, and summarizes them through your signed-in agent CLIs; a one-click installer also drops a skill into Claude/Codex/generic agent skill directories so coding agents can call it.
 
 AI requests are explicit and apply to the selected article. AI activity does not change whether you have read an article.
 
@@ -38,7 +39,7 @@ AI requests are explicit and apply to the selected article. AI activity does not
 
 ### Install the preview
 
-Download the DMG from the [v0.1.2 release](https://github.com/YunosukeYoshino/reedar/releases/tag/v0.1.2), open it, and drag Reedar into Applications. The ZIP is an alternative containing the same app. Neither Bun nor a source checkout is required. The release includes a SHA-256 manifest and the preview limitations above.
+Download the DMG from the [v0.2.0 release](https://github.com/YunosukeYoshino/reedar/releases/tag/v0.2.0), open it, and drag Reedar into Applications. The ZIP is an alternative containing the same app. Neither Bun nor a source checkout is required. The release includes a SHA-256 manifest and the preview limitations above.
 
 ### Run the desktop app
 
@@ -51,7 +52,7 @@ bun run start
 
 Installation downloads Electron. The start command builds the renderer and desktop entry point, then opens Reedar. Local DMG and ZIP previews can also be built with `bun run dist:mac --arm64`. Developer ID signed releases are not available yet; see [Distribution](docs/distribution.md).
 
-### App updates (0.1.3 development build)
+### App updates (0.2.0 development build)
 
 The desktop app checks the public GitHub releases 30 seconds after launch and every six hours while open. Use **Reedar → アップデートを確認…** to check immediately. This preview receives newer public releases and prereleases for the current Mac architecture; it does not downgrade.
 
@@ -71,7 +72,7 @@ If retrieval fails or produces less text than the feed, the assistant uses the s
 
 ## Manage subscriptions
 
-Open **Organize feeds** (`フィードを整理`, the menu beside the sidebar's feed heading) to move or remove a subscription. Removed feeds disappear from reading views and stop refreshing. Their cached articles, stars, and conversations are retained; expand **削除済みのフィード** in the same dialog to restore them. Removing a feed stops its active AI responses and preserves partial text. Folder deletion is not implemented yet.
+Open **Organize feeds** (`フィードを整理`, the menu beside the sidebar's feed heading) to move or remove a subscription. Removed feeds disappear from reading views and stop refreshing. Their cached articles, stars, and conversations are retained; expand **削除済みのフィード** in the same dialog to restore them. Removing a feed stops its active AI responses and preserves partial text. Folders can be renamed and deleted from the same dialog; deleting a folder moves its feeds to "no folder".
 
 Open **OPML import/export** (`OPML入出力`) at the bottom of the sidebar:
 
@@ -103,6 +104,19 @@ Codex requires a ChatGPT login and access to `gpt-5.3-codex-spark`. Reedar check
 Reedar prefers the Codex CLI bundled with OpenAI’s Codex desktop app, then checks `PATH` and common install locations. You can specify an executable with `REEDAR_CODEX_BIN`, `REEDAR_CLAUDE_BIN`, or `REEDAR_ANTIGRAVITY_BIN`. The Antigravity override affects detection only. Reedar does not rewrite your existing CLI settings.
 
 See the [validation record](docs/validation.md) for tested versions, evidence, and integration limitations.
+
+## Reedar CLI
+
+Choose **CLIとスキルをインストール** in **エージェント接続** to place a `reedar` command at `~/.local/bin/reedar` plus a skill file in `~/.claude/skills/reedar`, `~/.codex/skills/reedar`, and `~/.agents/skills/reedar`. The CLI reads `~/Library/Application Support/Reedar/reader.json` directly (read-only; the app does not need to be running) and supports:
+
+```sh
+reedar feeds                              # feeds with unread/star counts
+reedar articles --unread --feed hnrss     # newest-first listing
+reedar article <id>                       # full article text (prefix ids ok)
+reedar summarize <id>                     # summary via your signed-in agent CLI
+```
+
+List commands emit JSON Lines, stdout defaults to JSON when piped, and errors go to stderr — the surface is designed for coding agents and `jq` pipelines. `summarize` reuses the app's agent adapter (Codex or Claude login required). Override the library path with `REEDAR_STORE`. Packaged builds ship a compiled binary at `Contents/Resources/bin/reedar`; development installs shim to `bun src/cli/reedar.ts`.
 
 ## Keyboard shortcuts
 
@@ -157,7 +171,7 @@ Built with **Electron, React, TypeScript, and Bun**. Source lives in `src/main` 
 
 ## Scope
 
-This preview focuses on reading a local feed library and discussing individual articles. It does not yet include folder deletion, scheduled refresh, full-library backup/restore, Inoreader or other service sync, mobile clients, automatic digests, or Developer ID signed installers. Large-library performance has not been benchmarked.
+This preview focuses on reading a local feed library and discussing individual articles. It does not yet include scheduled refresh, full-library backup/restore, Inoreader or other service sync, mobile clients, automatic digests, or Developer ID signed installers. Large-library performance has not been benchmarked.
 
 The [roadmap checklist](ROADMAP.md) tracks completed work, public-preview preparation, daily-reader improvements, and longer-term candidates.
 
