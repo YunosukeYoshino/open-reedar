@@ -148,6 +148,11 @@ const en = {
   "feed.adding": "Fetching…",
   "feed.add": "Add feed",
   "feed.addFailed": "Could not add it.",
+  "feed.discover": "Find feeds on site",
+  "feed.discovering": "Searching…",
+  "feed.noFeeds": "No feeds found on this site.",
+  "feed.subscribe": "Subscribe",
+  "feed.invalidUrl": "Enter a valid URL.",
 
   // Folder dialog
   "folder.renameTitle": "Rename folder",
@@ -567,6 +572,11 @@ const ja: Record<MessageKey, string> = {
   "feed.adding": "取得しています…",
   "feed.add": "フィードを追加",
   "feed.addFailed": "追加できませんでした。",
+  "feed.discover": "サイト内のフィードを探す",
+  "feed.discovering": "探しています…",
+  "feed.noFeeds": "このサイトにはフィードが見つかりませんでした。",
+  "feed.subscribe": "登録する",
+  "feed.invalidUrl": "正しいURLを入力してください。",
 
   "folder.renameTitle": "フォルダ名を変更",
   "folder.createTitle": "フォルダを作成",

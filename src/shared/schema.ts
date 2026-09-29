@@ -141,6 +141,7 @@ export const snapshotSchema = z.object({
   organize: organizeJobSchema.nullable().optional(),
   cliInstall: cliInstallSchema.nullable().optional(),
   markReadUndo: z.object({ count: z.number().int().nonnegative() }).nullable().optional(),
+  feedDiscovery: z.object({ url: z.string(), candidates: z.array(z.object({ url: z.string(), title: z.string() })) }).nullable().optional(),
 });
 export type Snapshot = z.infer<typeof snapshotSchema>;
 
@@ -152,6 +153,8 @@ export type Update = z.infer<typeof updateSchema>;
 
 export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("feed.add"), url: z.string().trim().url().max(2048), folderId: z.string().nullable() }),
+  z.object({ type: z.literal("feed.discover"), url: z.string().trim().url().max(2048) }),
+  z.object({ type: z.literal("feed.discoverClear") }),
   z.object({ type: z.literal("feed.remove"), id: z.string() }),
   z.object({ type: z.literal("feed.restore"), id: z.string() }),
   z.object({ type: z.literal("feed.move"), id: z.string(), folderId: z.string().nullable() }),
