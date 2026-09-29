@@ -17,16 +17,19 @@ on:
         type: boolean
         required: true
         default: false
+  push:
+    tags:
+      - "v*"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
     runs-on: macos-latest
     timeout-minutes: 30
     env:
-      BUILD_ARCH: ${{ inputs.architecture }}
+      BUILD_ARCH: ${{ inputs.architecture || 'arm64' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -81,3 +84,12 @@ jobs:
             release/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd release
+          gh release create "$GITHUB_REF_NAME" --prerelease --generate-notes \
+            --title "Reedar ${GITHUB_REF_NAME#v}" \
+            *.dmg *.zip *.blockmap latest-mac.yml SHA256SUMS.txt
