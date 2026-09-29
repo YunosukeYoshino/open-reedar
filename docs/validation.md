@@ -1,6 +1,6 @@
 # Validation record
 
-Last verified: **September 12, 2026 (JST)**. Environment: macOS, Bun 1.3.12, Electron 42.11.1. This record describes observed behavior, not a promise of compatibility with every account or future CLI release. Earlier checks retain their original scope below; see the [roadmap](../ROADMAP.md) for outstanding work.
+Last verified: **September 12, 2026 (JST)**. Environment: macOS, Bun 1.4.2, Electron 42.11.1. This record describes observed behavior, not a promise of compatibility with every account or future CLI release. Earlier checks retain their original scope below; see the [roadmap](../ROADMAP.md) for outstanding work.
 
 ## Automated checks
 

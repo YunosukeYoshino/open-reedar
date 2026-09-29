@@ -6,7 +6,7 @@ Start with the [roadmap](ROADMAP.md) for proposed work and its completion criter
 
 ## Set up a development environment
 
-Use macOS, Bun, and the `trash` command. The validated baseline is Bun 1.3.12 and Electron 42.11.1. Tests use `trash` to remove temporary fixtures.
+Use macOS, Bun, and the `trash` command. The validated baseline is Bun 1.4.2 and Electron 42.11.1. Tests use `trash` to remove temporary fixtures.
 
 From your checkout:
 
