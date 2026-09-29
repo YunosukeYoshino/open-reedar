@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { z } from "zod";
-import type { Action, Agent, Connection, Conversation, OpmlImport, OpmlPreview, OrganizeJob, Snapshot, Update } from "../shared/schema";
+import type { Action, Agent, CliInstall, Connection, Conversation, OpmlImport, OpmlPreview, OrganizeJob, Snapshot, Update } from "../shared/schema";
 import { agentSchema, codexModel } from "../shared/schema";
 import { agentError, AuthenticationRequired, connection, runOrganizer, runReader } from "./agents/reader";
 import { loadArticleText } from "./article-text";
@@ -9,6 +9,7 @@ import { loadFeed } from "./feeds";
 import { parseOpml } from "./opml";
 import { publicUrl } from "./network";
 import { Store } from "./store";
+import { installCli } from "./cli-install";
 
 type Dependencies = { fetchArticleText: typeof loadArticleText; fetchFeed: typeof loadFeed; run: typeof runReader; connect: typeof connection; organize: typeof runOrganizer };
 const defaults: Dependencies = { fetchArticleText: loadArticleText, fetchFeed: loadFeed, run: runReader, connect: connection, organize: runOrganizer };
@@ -24,6 +25,7 @@ export class Engine {
   opmlImport: OpmlImport | null = null;
   opmlPreview: OpmlPreview | null = null;
   organize: OrganizeJob | null = null;
+  cliInstall: CliInstall | null = null;
   private importJob: { controller: AbortController; done: Promise<void> } | undefined;
   private organizeRun: { controller: AbortController; done: Promise<void> } | undefined;
   private listeners = new Set<(update: Update) => void>();
@@ -40,11 +42,16 @@ export class Engine {
     await this.refreshConnections();
   }
 
-  get snapshot(): Snapshot { return { state: this.store.state, connections: this.connections, refreshing: this.refreshing, opmlImport: this.opmlImport, opmlPreview: this.opmlPreview, organize: this.organize }; }
+  get snapshot(): Snapshot { return { state: this.store.state, connections: this.connections, refreshing: this.refreshing, opmlImport: this.opmlImport, opmlPreview: this.opmlPreview, organize: this.organize, cliInstall: this.cliInstall }; }
 
   subscribe(listener: (update: Update) => void) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private emit(update: Update) { for (const listener of this.listeners) listener(update); }
   private changed() { this.emit({ type: "snapshot", snapshot: this.snapshot }); }
+
+  private async installCli() {
+    this.cliInstall = await installCli();
+    this.changed();
+  }
 
   async refreshConnections() {
     this.connections = await Promise.all(agentSchema.options.map((agent) => this.dependencies.connect(agent, this.runnerDirectory)));
@@ -108,6 +115,7 @@ export class Engine {
       }
       case "refresh": return this.refreshFeeds();
       case "connections.refresh": return this.refreshConnections();
+      case "cli.install": return this.installCli();
       case "chat.send": return this.send(action.articleId, action.agent, action.text);
       case "chat.summarize": return this.send(action.articleId, action.agent, "この記事の要点と結論を日本語で簡潔に要約してください。重要な事実と背景を含め、本文にない推測は避けてください。", "summary");
       case "chat.stop": return this.stop(action.conversationId);

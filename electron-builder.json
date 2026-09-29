@@ -9,6 +9,7 @@
   },
   "files": [
     "dist/**/*",
+    "!dist/reedar",
     "package.json"
   ],
   "artifactName": "Reedar-${version}-mac-${arch}-preview.${ext}",
@@ -45,6 +46,10 @@
     {
       "from": "node_modules/electron/dist/LICENSES.chromium.html",
       "to": "Resources/licenses/LICENSES.chromium.html"
+    },
+    {
+      "from": "dist/reedar",
+      "to": "Resources/bin/reedar"
     }
   ]
 }
