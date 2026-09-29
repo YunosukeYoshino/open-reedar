@@ -4,11 +4,15 @@
 
 **A quiet RSS reader. A conversation with every article.**
 
+[![CI](https://github.com/YunosukeYoshino/open-reedar/actions/workflows/ci.yml/badge.svg)](https://github.com/YunosukeYoshino/open-reedar/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/YunosukeYoshino/open-reedar?include_prereleases)](https://github.com/YunosukeYoshino/open-reedar/releases) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+*Read this in Japanese: [README.ja.md](README.ja.md)*
+
 Reedar is a desktop RSS reader for macOS, inspired by the familiar three-pane reading experience. Follow your feeds, organize articles, and ask your existing coding agents to help you understand what you read.
 
 Bring your own CLI login. Reedar uses the agent's existing service access and usage allowance; it does not require a separate model API key.
 
-> **Early preview for macOS on Apple Silicon.** Codex reading is verified with GPT-6-Luna. Claude Code's successful live reading is unverified, and Antigravity reading is disabled. The interface and reading assistant currently use Japanese.
+> **Early preview for macOS on Apple Silicon.** Codex reading is verified with GPT-6-Luna. Claude Code's successful live reading is unverified, and Antigravity reading is disabled. The interface and reading assistant currently use Japanese only; the English UI labels referenced in this document are translations.
 >
 > **Download limitations:** the DMG / ZIP previews use ad-hoc signing and are **not notarized**. macOS may block a downloaded app. Installation on another Mac and Intel execution have not been verified. See [Distribution](docs/distribution.md) before installing a build.
 
@@ -25,7 +29,7 @@ Bring your own CLI login. Reedar uses the agent's existing service access and us
 - **Conversations that stay with the article:** local history includes a snapshot of the source text used for the conversation.
 - **Clear execution states:** running, waiting, completed, failed, and cancelled, with a stop control that preserves partial answers.
 - **Keyboard navigation:** move through articles and manage reading state without leaving the keyboard.
-- **Terminal and agent harnesses:** a `open-reedar` CLI lists feeds with unread status, browses and prints articles, and summarizes them through your signed-in agent CLIs; a one-click installer also drops a skill into Claude/Codex/generic agent skill directories so coding agents can call it.
+- **Terminal and agent harnesses:** an `open-reedar` CLI lists feeds with unread status, browses and prints articles, and summarizes them through your signed-in agent CLIs; a one-click installer also drops a skill into Claude/Codex/generic agent skill directories so coding agents can call it.
 
 AI requests are explicit and apply to the selected article. AI activity does not change whether you have read an article.
 
@@ -54,9 +58,9 @@ Installation downloads Electron. The start command builds the renderer and deskt
 
 ### App updates (0.2.0 development build)
 
-The desktop app checks the public GitHub releases 30 seconds after launch and every six hours while open. Use **Reedar → アップデートを確認…** to check immediately. This preview receives newer public releases and prereleases for the current Mac architecture; it does not downgrade.
+The desktop app checks the public GitHub releases 30 seconds after launch and every six hours while open. Use the **Reedar → Check for Updates** menu item to check immediately. This preview receives newer public releases and prereleases for the current Mac architecture; it does not downgrade.
 
-Ad-hoc previews notify you and open the release download page. A Developer ID signed build automatically downloads and validates updates, then offers to restart. Choosing **あとで** keeps the app open and applies the staged update after the next normal quit. Restarting stops active AI responses and OPML imports and saves their current results first. Development runs do not check for updates.
+Ad-hoc previews notify you and open the release download page. A Developer ID signed build automatically downloads and validates updates, then offers to restart. Choosing **Later** keeps the app open and applies the staged update after the next normal quit. Restarting stops active AI responses and OPML imports and saves their current results first. Development runs do not check for updates.
 
 **The published 0.1.2 app has no updater and needs a manual replacement.** A first Developer ID signed version also needs to be installed manually when moving from an ad-hoc preview. Successful signed-app replacement is not yet verified: the project still needs a Developer ID Application certificate and notarization credentials. See [Distribution](docs/distribution.md#app-update-delivery) for the required release assets and signing setup.
 
@@ -64,22 +68,22 @@ Ad-hoc previews notify you and open the release download page. A Developer ID si
 
 1. Click **+** in the sidebar and enter an RSS or Atom URL.
 2. Select an article to read it. Use the toolbar to star it or mark it unread.
-3. Open **Read with AI** (`AIと読む`), choose an agent, and send a question or use the summary shortcut.
+3. Open **Read with AI** , choose an agent, and send a question or use the summary shortcut.
 
-Reedar initially displays the text supplied by the feed. Before answering or summarizing, it fetches the linked HTML page and extracts the article text locally. The **要約する** button displays a streamed summary in the main reader; **フィード本文に戻る** restores the feed view. You can inspect the text supplied to the AI beneath the summary.
+Reedar initially displays the text supplied by the feed. Before answering or summarizing, it fetches the linked HTML page and extracts the article text locally. The **Summarize** button displays a streamed summary in the main reader; **Back to feed text** restores the feed view. You can inspect the text supplied to the AI beneath the summary.
 
 If retrieval fails or produces less text than the feed, the assistant uses the saved feed text and identifies that limitation. Extraction does not execute JavaScript, use browser cookies, or bypass login/paywalls, and cannot guarantee complete text on every website. Follow-up questions reuse the retrieved source. Ordinary webpage URLs cannot yet be registered as feeds automatically.
 
 ## Manage subscriptions
 
-Open **Organize feeds** (`フィードを整理`, the menu beside the sidebar's feed heading) to move or remove a subscription. Removed feeds disappear from reading views and stop refreshing. Their cached articles, stars, and conversations are retained; expand **削除済みのフィード** in the same dialog to restore them. Removing a feed stops its active AI responses and preserves partial text. Folders can be renamed and deleted from the same dialog; deleting a folder moves its feeds to "no folder".
+Open **Organize feeds** (the menu beside the sidebar's feed heading) to move or remove a subscription. Removed feeds disappear from reading views and stop refreshing. Their cached articles, stars, and conversations are retained; expand **Removed feeds** in the same dialog to restore them. Removing a feed stops its active AI responses and preserves partial text. Folders can be renamed and deleted from the same dialog; deleting a folder moves its feeds to "no folder".
 
-Open **OPML import/export** (`OPML入出力`) at the bottom of the sidebar:
+Open **OPML import/export**  at the bottom of the sidebar:
 
-- Select a UTF-8 `.opml` or `.xml` file, then choose **OPMLを読み込む**. Imports support up to 256 KB and 200 feed entries per file.
+- Select a UTF-8 `.opml` or `.xml` file, then choose **Import OPML**. Imports support up to 256 KB and 200 feed entries per file.
 - Existing subscriptions and duplicate entries are skipped. Removed subscriptions are restored. Valid feeds are saved even when other entries fail; the dialog shows each result and supports cancellation.
 - Folder membership is retained. Nested paths become a single folder name such as `Technology / Web`; paths longer than 60 characters fail for that entry. Empty folders are not created during import.
-- Choose **OPMLを書き出す** to download the active subscriptions and their folders. This is a subscription export, not a complete library backup: article text, stars, conversations, and removed feeds are excluded.
+- Choose **Export OPML** to download the active subscriptions and their folders. This is a subscription export, not a complete library backup: article text, stars, conversations, and removed feeds are excluded.
 
 External OPML inclusions are not followed. DTDs, entities, malformed XML, and private-network feed URLs are rejected. Import progress is available during the current app session; successfully registered subscriptions survive restart.
 
@@ -91,7 +95,7 @@ External OPML inclusions are not followed. DTDs, entities, malformed XML, and pr
 | **Claude Code** | Adapter implemented; live verification pending | Authentication-waiting behavior verified; successful live reading has not been validated |
 | **Antigravity** | CLI detection only | Shown as integration pending; article submission is disabled until per-session tool restrictions can be enforced |
 
-Open **Agent connections** (`エージェント接続`) to inspect availability. Sign in through the CLI outside Reedar, then refresh the connection status:
+Open **Agent connections**  to inspect availability. Sign in through the CLI outside Reedar, then refresh the connection status:
 
 ```sh
 # Choose the CLI you use:
@@ -105,9 +109,9 @@ Reedar prefers the Codex CLI bundled with OpenAI’s Codex desktop app, then che
 
 See the [validation record](docs/validation.md) for tested versions, evidence, and integration limitations.
 
-## Reedar CLI
+## open-reedar CLI
 
-Choose **CLIとスキルをインストール** in **エージェント接続** to place a `open-reedar` command at `~/.local/bin/open-reedar` plus a skill file in `~/.claude/skills/open-reedar`, `~/.codex/skills/open-reedar`, and `~/.agents/skills/open-reedar`. The CLI reads `~/Library/Application Support/Reedar/reader.json` directly (read-only; the app does not need to be running) and supports:
+Choose **Install CLI and skills** in **Agent connections** to place a `open-reedar` command at `~/.local/bin/open-reedar` plus a skill file in `~/.claude/skills/open-reedar`, `~/.codex/skills/open-reedar`, and `~/.agents/skills/open-reedar`. The CLI reads `~/Library/Application Support/Reedar/reader.json` directly (read-only; the app does not need to be running) and supports:
 
 ```sh
 open-reedar feeds                              # feeds with unread/star counts
