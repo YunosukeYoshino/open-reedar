@@ -1,34 +1,46 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
-import type { Action, Connection, Conversation, OpmlImport, OpmlPreview, Snapshot, Update } from "../shared/schema";
+import { z } from "zod";
+import type { Action, Agent, Connection, Conversation, OpmlImport, OpmlPreview, OrganizeJob, Snapshot, Update } from "../shared/schema";
 import { agentSchema, codexModel } from "../shared/schema";
-import { agentError, AuthenticationRequired, connection, runReader } from "./agents/reader";
+import { agentError, AuthenticationRequired, connection, runOrganizer, runReader } from "./agents/reader";
 import { loadArticleText } from "./article-text";
 import { loadFeed } from "./feeds";
 import { parseOpml } from "./opml";
 import { publicUrl } from "./network";
 import { Store } from "./store";
 
-type Dependencies = { fetchArticleText: typeof loadArticleText; fetchFeed: typeof loadFeed; run: typeof runReader; connect: typeof connection };
-const defaults: Dependencies = { fetchArticleText: loadArticleText, fetchFeed: loadFeed, run: runReader, connect: connection };
+type Dependencies = { fetchArticleText: typeof loadArticleText; fetchFeed: typeof loadFeed; run: typeof runReader; connect: typeof connection; organize: typeof runOrganizer };
+const defaults: Dependencies = { fetchArticleText: loadArticleText, fetchFeed: loadFeed, run: runReader, connect: connection, organize: runOrganizer };
+
+const organizeResponseSchema = z.object({
+  moves: z.array(z.object({ feedId: z.string(), folder: z.string() })).max(500).optional(),
+  assignments: z.array(z.object({ url: z.string(), folder: z.string() })).max(500).optional(),
+});
 
 export class Engine {
   connections: Connection[] = agentSchema.options.map((agent) => ({ agent, installed: false, status: "checking", detail: "接続を確認しています" }));
   refreshing = false;
   opmlImport: OpmlImport | null = null;
   opmlPreview: OpmlPreview | null = null;
+  organize: OrganizeJob | null = null;
   private importJob: { controller: AbortController; done: Promise<void> } | undefined;
+  private organizeRun: { controller: AbortController; done: Promise<void> } | undefined;
   private listeners = new Set<(update: Update) => void>();
   private jobs = new Map<string, { controller: AbortController; done: Promise<void> }>();
 
-  constructor(readonly store: Store, private readonly runnerDirectory: string, private readonly dependencies: Dependencies = defaults) {}
+  private readonly dependencies: Dependencies;
+
+  constructor(readonly store: Store, private readonly runnerDirectory: string, dependencies: Partial<Dependencies> = {}) {
+    this.dependencies = { ...defaults, ...dependencies };
+  }
 
   async initialize() {
     await mkdir(this.runnerDirectory, { recursive: true, mode: 0o700 });
     await this.refreshConnections();
   }
 
-  get snapshot(): Snapshot { return { state: this.store.state, connections: this.connections, refreshing: this.refreshing, opmlImport: this.opmlImport, opmlPreview: this.opmlPreview }; }
+  get snapshot(): Snapshot { return { state: this.store.state, connections: this.connections, refreshing: this.refreshing, opmlImport: this.opmlImport, opmlPreview: this.opmlPreview, organize: this.organize }; }
 
   subscribe(listener: (update: Update) => void) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private emit(update: Update) { for (const listener of this.listeners) listener(update); }
@@ -80,10 +92,19 @@ export class Engine {
       case "folder.save": this.store.saveFolder(action.id, action.name); break;
       case "article.read": this.store.article(action.id).read = action.read; break;
       case "article.star": this.store.article(action.id).starred = action.starred; break;
-      case "opml.import": return this.importOpml(action.xml, action.urls);
+      case "opml.import": return this.importOpml(action.xml, action.urls, action.folders);
       case "opml.preview": return this.previewOpml(action.xml);
       case "opml.previewClear": this.opmlPreview = null; this.changed(); return;
       case "opml.stop": this.importJob?.controller.abort(); return;
+      case "organize.propose": return this.proposeOrganize(action.agent, action.scope);
+      case "organize.apply": this.applyOrganize(action.moves, action.assignments); break;
+      case "organize.cancel": this.organizeRun?.controller.abort(); this.organize = null; this.changed(); return;
+      case "organize.clear": {
+        if (this.organizeRun) throw new Error("整理案の生成は実行中です。");
+        this.organize = null;
+        this.changed();
+        return;
+      }
       case "refresh": return this.refreshFeeds();
       case "connections.refresh": return this.refreshConnections();
       case "chat.send": return this.send(action.articleId, action.agent, action.text);
@@ -123,10 +144,11 @@ export class Engine {
     this.changed();
   }
 
-  private async importOpml(xml: string, urls?: string[]) {
+  private async importOpml(xml: string, urls?: string[], folders?: Record<string, string>) {
     if (this.importJob) throw new Error("OPMLの読み込みは実行中です。");
     const selected = urls ? new Set(urls) : null;
-    const entries = (await parseOpml(xml)).filter((entry) => !selected || selected.has(entry.url));
+    const entries = (await parseOpml(xml)).map((entry) => ({ ...entry, folderName: folders?.[entry.url] ?? entry.folderName }))
+      .filter((entry) => !selected || selected.has(entry.url));
     if (this.importJob) throw new Error("OPMLの読み込みは実行中です。");
     const report: OpmlImport = { status: "running", total: entries.length, results: [] };
     this.opmlImport = report;
@@ -177,6 +199,109 @@ export class Engine {
     })();
     this.importJob = { controller, done };
     void done.catch(() => {});
+  }
+
+  private proposeOrganize(agent: Agent, scope: OrganizeJob["scope"]) {
+    if (this.organizeRun) throw new Error("整理案の生成は実行中です。");
+    if (scope === "opml" && !this.opmlPreview?.entries.some((entry) => entry.resolution === "new" || entry.resolution === "restorable")) {
+      throw new Error("先にOPMLのプレビューを作成してください。");
+    }
+    const startedAt = new Date().toISOString();
+    const prompt = this.organizePrompt(scope);
+    const controller = new AbortController();
+    this.organize = { scope, agent, status: "running", startedAt };
+    this.changed();
+    const done = (async () => {
+      let text = "";
+      try {
+        await this.dependencies.organize(agent, prompt, this.runnerDirectory, controller.signal, (event) => {
+          if (!controller.signal.aborted && event.type === "delta") text = event.text;
+        });
+        if (controller.signal.aborted) return;
+        this.organize = { scope, agent, status: "completed", startedAt, plan: this.organizePlan(scope, text) };
+      } catch (error) {
+        this.organize = controller.signal.aborted ? null
+          : { scope, agent, status: "failed", startedAt, detail: agentError(error) };
+      } finally { this.organizeRun = undefined; this.changed(); }
+    })();
+    this.organizeRun = { controller, done };
+    void done.catch(() => { this.changed(); });
+  }
+
+  private organizePrompt(scope: OrganizeJob["scope"]) {
+    const folders = this.store.state.folders.map((folder) => folder.name);
+    if (scope === "opml") {
+      const entries = (this.opmlPreview?.entries ?? [])
+        .filter((entry) => entry.resolution === "new" || entry.resolution === "restorable")
+        .map((entry) => ({ url: entry.url, title: entry.title, folder: entry.folderName }));
+      return JSON.stringify({ task: "OPMLで取り込むフィードにフォルダを割り当てる案を作成してください。", folders, entries });
+    }
+    const feeds = this.store.state.feeds.filter((feed) => !feed.removedAt).map((feed) => ({
+      id: feed.id, title: feed.title, url: feed.url,
+      folder: this.store.state.folders.find((folder) => folder.id === feed.folderId)?.name ?? null,
+      recent: this.store.state.articles.filter((article) => article.feedId === feed.id).slice(0, 3).map((article) => article.title),
+    }));
+    return JSON.stringify({ task: "フィードをテーマ別のフォルダに整理する案を作成してください。", folders, feeds });
+  }
+
+  private organizePlan(scope: OrganizeJob["scope"], text: string): NonNullable<OrganizeJob["plan"]> {
+    let parsed: z.infer<typeof organizeResponseSchema>;
+    try {
+      const start = text.indexOf("{");
+      const end = text.lastIndexOf("}");
+      parsed = organizeResponseSchema.parse(JSON.parse(start >= 0 && end > start ? text.slice(start, end + 1) : text));
+    } catch { throw new Error("整理案を解釈できませんでした。もう一度お試しください。"); }
+    const folders = this.store.state.folders;
+    const plan: NonNullable<OrganizeJob["plan"]> = { moves: [], assignments: [] };
+    if (scope === "opml") {
+      const seen = new Set<string>();
+      for (const item of parsed.assignments ?? []) {
+        const folderName = item.folder.trim();
+        const entry = this.opmlPreview?.entries.find((e) => e.url === item.url && (e.resolution === "new" || e.resolution === "restorable"));
+        if (!entry || !folderName || folderName.length > 60 || entry.folderName === folderName || seen.has(item.url)) continue;
+        seen.add(item.url);
+        plan.assignments.push({ url: entry.url, title: entry.title, folderName });
+      }
+      return plan;
+    }
+    const seen = new Set<string>();
+    for (const item of parsed.moves ?? []) {
+      const folderName = item.folder.trim();
+      const feed = this.store.state.feeds.find((f) => f.id === item.feedId && !f.removedAt);
+      const current = feed ? folders.find((f) => f.id === feed.folderId)?.name ?? null : null;
+      if (!feed || !folderName || folderName.length > 60 || current === folderName || seen.has(item.feedId)) continue;
+      seen.add(item.feedId);
+      plan.moves.push({ feedId: feed.id, title: feed.title, folderName, newFolder: !folders.some((f) => f.name === folderName) });
+    }
+    return plan;
+  }
+
+  private applyOrganize(moves?: { feedId: string; folderName: string }[], assignments?: { url: string; folderName: string }[]) {
+    const job = this.organize;
+    if (!job || job.status !== "completed" || !job.plan) throw new Error("適用できる整理案がありません。");
+    if (job.scope === "opml") {
+      const preview = this.opmlPreview;
+      if (!preview) throw new Error("プレビューがありません。");
+      const folders = this.store.state.folders;
+      for (const item of assignments ?? []) {
+        const folderName = item.folderName.trim();
+        const entry = preview.entries.find((e) => e.url === item.url && (e.resolution === "new" || e.resolution === "restorable"));
+        if (!entry || !folderName || folderName.length > 60) continue;
+        entry.folderName = folderName;
+        entry.detail = folders.some((f) => f.name === folderName) ? undefined : `フォルダ「${folderName}」を作成します。`;
+      }
+      this.organize = null;
+      return;
+    }
+    for (const item of moves ?? []) {
+      const feed = this.store.state.feeds.find((f) => f.id === item.feedId && !f.removedAt);
+      const folderName = item.folderName.trim();
+      if (!feed || !folderName || folderName.length > 60) continue;
+      let folder = this.store.state.folders.find((f) => f.name === folderName);
+      if (!folder) { this.store.saveFolder(null, folderName); folder = this.store.state.folders.find((f) => f.name === folderName); }
+      if (folder) feed.folderId = folder.id;
+    }
+    this.organize = null;
   }
 
   private async refreshFeeds() {
@@ -284,10 +409,11 @@ export class Engine {
     this.changed();
   }
 
-  async settle() { await Promise.all([...this.jobs.values()].map((job) => job.done).concat(this.importJob ? [this.importJob.done] : [])); }
+  async settle() { await Promise.all([...this.jobs.values()].map((job) => job.done).concat(this.importJob ? [this.importJob.done] : []).concat(this.organizeRun ? [this.organizeRun.done] : [])); }
 
   async close() {
     this.importJob?.controller.abort();
+    this.organizeRun?.controller.abort();
     for (const job of this.jobs.values()) job.controller.abort();
     await this.settle();
     await this.store.save();

@@ -1,14 +1,14 @@
-import { Download, Upload } from "lucide-react";
+import { Download, Sparkles, Upload } from "lucide-react";
 import { useRef, useState } from "react";
-import type { Action, OpmlImport, OpmlPreview } from "../shared/schema";
+import type { Action, Agent, OpmlImport, OpmlPreview, OrganizeJob } from "../shared/schema";
 import { Dialog } from "./Dialog";
 
-type Props = { report: OpmlImport | null | undefined; preview: OpmlPreview | null | undefined; hasFeeds: boolean; act: (action: Action) => Promise<void>; perform: (action: Action) => void };
+type Props = { report: OpmlImport | null | undefined; preview: OpmlPreview | null | undefined; hasFeeds: boolean; act: (action: Action) => Promise<void>; perform: (action: Action) => void; organize: OrganizeJob | null | undefined; agent: Agent | null };
 const resultLabels = { imported: "登録", skipped: "スキップ", failed: "失敗" };
 const resolutionLabels = { new: "新規", duplicate: "登録済み", restorable: "復元", invalid: "無効", inFileDuplicate: "重複" };
 const isSelectable = (resolution: OpmlPreview["entries"][number]["resolution"]) => resolution === "new" || resolution === "restorable";
 
-export function OpmlDialog({ report, preview, hasFeeds, act, perform }: Props) {
+export function OpmlDialog({ report, preview, hasFeeds, act, perform, organize, agent }: Props) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +35,10 @@ export function OpmlDialog({ report, preview, hasFeeds, act, perform }: Props) {
   async function apply() {
     if (!xml || !chosen.length || sending || running) return;
     setSending(true); setError(null);
-    try { await act({ type: "opml.import", xml, urls: chosen.map((entry) => entry.url) }); }
+    try {
+      const folders = Object.fromEntries(chosen.flatMap((entry) => entry.folderName ? [[entry.url, entry.folderName]] : []));
+      await act({ type: "opml.import", xml, urls: chosen.map((entry) => entry.url), ...(Object.keys(folders).length ? { folders } : {}) });
+    }
     catch (error: unknown) { setError(error instanceof Error ? error.message : "読み込めませんでした。"); }
     finally { setSending(false); }
   }
@@ -47,6 +50,7 @@ export function OpmlDialog({ report, preview, hasFeeds, act, perform }: Props) {
   function close() {
     setXml(null); setDeselected(new Set()); setPickedMissing(new Set()); setConfirmingMissing(false); setError(null);
     perform({ type: "opml.previewClear" });
+    if (organize?.scope === "opml") perform({ type: "organize.cancel" });
   }
   function toggle(url: string, checked: boolean) {
     const next = new Set(deselected);
@@ -69,23 +73,39 @@ export function OpmlDialog({ report, preview, hasFeeds, act, perform }: Props) {
         <div className="dialog-actions"><button className="primary-button" type="submit" disabled={sending || running}><Upload size={14} />{sending ? "ファイルを確認中…" : "OPMLを確認する"}</button>{running ? <button className="secondary-button" type="button" aria-label="OPMLの読み込みを中止" onClick={() => perform({ type: "opml.stop" })}>中止</button> : null}</div>
       </form>
     </div>
-    {preview ? <PreviewSection preview={preview} deselected={deselected} toggle={toggle} selectable={selectable} chosen={chosen} setDeselected={setDeselected} pickedMissing={pickedMissing} toggleMissing={toggleMissing} confirmingMissing={confirmingMissing} setConfirmingMissing={setConfirmingMissing} apply={apply} removeMissing={removeMissing} disabled={sending || running} /> : null}
+    {preview ? <PreviewSection preview={preview} deselected={deselected} toggle={toggle} selectable={selectable} chosen={chosen} setDeselected={setDeselected} pickedMissing={pickedMissing} toggleMissing={toggleMissing} confirmingMissing={confirmingMissing} setConfirmingMissing={setConfirmingMissing} apply={apply} removeMissing={removeMissing} disabled={sending || running} organize={organize} agent={agent} act={act} perform={perform} /> : null}
     {report ? <ImportReport report={report} /> : null}
     <div className="opml-export"><h3>登録中のフィードを書き出す</h3><p className="dialog-description">フィードURLとフォルダ名を保存します。記事本文・スター・AIの会話・削除済みのフィードは含みません。</p>{hasFeeds ? <a className="secondary-button" href="/api/opml" download="Reedar.opml"><Download size={14} />OPMLを書き出す</a> : <button className="secondary-button" disabled><Download size={14} />OPMLを書き出す</button>}</div>
   </Dialog>;
 }
 
-function PreviewSection({ preview, deselected, toggle, selectable, chosen, setDeselected, pickedMissing, toggleMissing, confirmingMissing, setConfirmingMissing, apply, removeMissing, disabled }: {
+function PreviewSection({ preview, deselected, toggle, selectable, chosen, setDeselected, pickedMissing, toggleMissing, confirmingMissing, setConfirmingMissing, apply, removeMissing, disabled, organize, agent, act, perform }: {
   preview: OpmlPreview; deselected: Set<string>; toggle: (url: string, checked: boolean) => void; selectable: string[]; chosen: OpmlPreview["entries"]; setDeselected: (value: Set<string>) => void;
   pickedMissing: Set<string>; toggleMissing: (id: string, checked: boolean) => void; confirmingMissing: boolean; setConfirmingMissing: (value: boolean) => void;
   apply: () => Promise<void>; removeMissing: () => Promise<void>; disabled: boolean;
+  organize: OrganizeJob | null | undefined; agent: Agent | null; act: (action: Action) => Promise<void>; perform: (action: Action) => void;
 }) {
+  const job = organize?.scope === "opml" ? organize : null;
+  const assignments = job?.plan?.assignments ?? [];
   return <section className="opml-preview" aria-label="読み込み内容の確認">
     <p>{preview.entries.length}件中 {chosen.length}件を読み込みます。</p>
     <div className="dialog-actions">
       <button className="text-button" type="button" onClick={() => setDeselected(new Set())}>すべて選択</button>
       <button className="text-button" type="button" onClick={() => setDeselected(new Set(selectable))}>すべて解除</button>
+      {agent ? <button className="text-button" type="button" disabled={disabled || job?.status === "running"} onClick={() => void act({ type: "organize.propose", agent, scope: "opml" })}><Sparkles size={12} />AIにフォルダ分け</button> : null}
     </div>
+    {job ? <div className="dialog-actions organize-banner">
+      {job.status === "running" ? <><p className="dialog-description">AIにフォルダ分けを依頼しています…</p><button className="secondary-button" type="button" onClick={() => perform({ type: "organize.cancel" })}>中止</button></> : null}
+      {job.status === "failed" ? <p className="form-error" role="alert">{job.detail ?? "フォルダ分け案を作成できませんでした。"}</p> : null}
+      {job.status === "completed" ? (assignments.length ? <>
+        <p className="dialog-description">AIのフォルダ分け案: {assignments.length}件のフォルダ割り当て</p>
+        <button className="primary-button" type="button" disabled={disabled} onClick={() => void act({ type: "organize.apply", assignments: assignments.map((item) => ({ url: item.url, folderName: item.folderName })) })}>適用</button>
+        <button className="secondary-button" type="button" onClick={() => perform({ type: "organize.clear" })}>破棄</button>
+      </> : <>
+        <p className="dialog-description">フォルダ分けの提案はありませんでした。</p>
+        <button className="secondary-button" type="button" onClick={() => perform({ type: "organize.clear" })}>閉じる</button>
+      </>) : null}
+    </div> : null}
     <ul className="opml-preview-list">
       {preview.entries.map((entry, index) => {
         const enabled = isSelectable(entry.resolution);
