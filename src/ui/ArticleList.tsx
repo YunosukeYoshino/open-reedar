@@ -1,4 +1,4 @@
-import { Search, Rss, Star, X } from "lucide-react";
+import { Layers, Search, Rss, Star, X } from "lucide-react";
 import type { Article, Feed } from "../shared/schema";
 import { useFormatters, useT } from "./i18n";
 import type { Filter } from "./Sidebar";
@@ -10,7 +10,7 @@ export function ArticleList({ title, articles, feeds, selectedId, filter, setFil
   const fmt = useFormatters();
   const feedNames = new Map(feeds.map((feed) => [feed.id, feed.title]));
   return <section className="article-list" aria-label={t("list.articles")}>
-    <header className="list-heading"><div><h1>{title}</h1><p>{t("list.count", { count: articles.length })}</p></div><Rss size={17} className="muted" /></header>
+    <header className="list-heading"><div><h1>{title}</h1><p>{t("list.count", { count: articles.length })}</p></div><div className="toolbar-group"><button className="icon-button" aria-label={t("digest.title")} title={t("digest.title")} commandfor="digest-dialog" command="show-modal"><Layers size={15} /></button><Rss size={17} className="muted" /></div></header>
     <div className="list-filter"><div className="segmented" role="group" aria-label={t("list.filter")}>{(["all", "unread", "starred"] as const).map((value) => <button key={value} aria-pressed={filter === value} className={filter === value ? "active" : ""} onClick={() => setFilter(value)}>{value === "all" ? t("list.all") : value === "unread" ? t("sidebar.unread") : t("sidebar.starred")}</button>)}</div></div>
     <div className="search-field"><Search size={14} /><input id="article-search" aria-label={t("list.search")} placeholder={t("list.search")} value={search} onChange={(event) => setSearch(event.target.value)} />{search ? <button className="icon-button" aria-label={t("list.clearSearch")} onClick={() => setSearch("")}><X size={13} /></button> : <kbd aria-hidden="true">/</kbd>}</div>
     <div className="article-items">

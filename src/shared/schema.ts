@@ -37,6 +37,8 @@ export const articleSchema = z.object({
   starred: z.boolean(),
   readerHtml: z.string().optional(),
   readerText: z.string().optional(),
+  note: z.string().max(8000).optional(),
+  highlights: z.array(z.string().max(2000)).max(100).optional(),
 });
 export type Article = z.infer<typeof articleSchema>;
 
@@ -87,6 +89,8 @@ export const stateSchema = z.object({
   conversations: z.array(conversationSchema),
   language: languageSchema.default("en"),
   refreshMinutes: z.number().int().min(0).max(1440).default(30),
+  fontSize: z.enum(["s", "m", "l"]).default("m"),
+  defaultAgent: agentSchema.optional(),
 });
 export type ReaderState = z.infer<typeof stateSchema>;
 
@@ -132,6 +136,15 @@ export type OrganizeJob = z.infer<typeof organizeJobSchema>;
 export const cliInstallSchema = z.object({ bin: z.string(), skills: z.array(z.string()) });
 export type CliInstall = z.infer<typeof cliInstallSchema>;
 
+export const digestSchema = z.object({
+  status: z.enum(["running", "completed", "cancelled", "failed"]),
+  agent: agentSchema,
+  text: z.string(),
+  titles: z.array(z.string()),
+  detail: z.string().optional(),
+});
+export type DigestJob = z.infer<typeof digestSchema>;
+
 export const snapshotSchema = z.object({
   state: stateSchema,
   connections: z.array(connectionSchema),
@@ -142,6 +155,7 @@ export const snapshotSchema = z.object({
   cliInstall: cliInstallSchema.nullable().optional(),
   markReadUndo: z.object({ count: z.number().int().nonnegative() }).nullable().optional(),
   feedDiscovery: z.object({ url: z.string(), candidates: z.array(z.object({ url: z.string(), title: z.string() })) }).nullable().optional(),
+  digest: digestSchema.nullable().optional(),
 });
 export type Snapshot = z.infer<typeof snapshotSchema>;
 
@@ -165,6 +179,8 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("articles.markReadUndo") }),
   z.object({ type: z.literal("article.fetchText"), id: z.string() }),
   z.object({ type: z.literal("article.star"), id: z.string(), starred: z.boolean() }),
+  z.object({ type: z.literal("article.note"), id: z.string(), note: z.string().max(8000) }),
+  z.object({ type: z.literal("article.highlights"), id: z.string(), highlights: z.array(z.string().max(2000)).max(100) }),
   z.object({ type: z.literal("opml.import"), xml: z.string().min(1).max(262_144), urls: z.array(z.string()).max(200).optional(), folders: z.record(z.string(), z.string().trim().min(1).max(60)).optional() }),
   z.object({ type: z.literal("opml.preview"), xml: z.string().min(1).max(262_144) }),
   z.object({ type: z.literal("opml.previewClear") }),
@@ -185,5 +201,10 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("chat.stop"), conversationId: z.string() }),
   z.object({ type: z.literal("app.setLanguage"), language: languageSchema }),
   z.object({ type: z.literal("app.setRefreshInterval"), minutes: z.number().int().min(0).max(1440) }),
+  z.object({ type: z.literal("app.setFontSize"), size: z.enum(["s", "m", "l"]) }),
+  z.object({ type: z.literal("app.setDefaultAgent"), agent: agentSchema }),
+  z.object({ type: z.literal("digest.run"), articleIds: z.array(z.string()).min(2).max(20), agent: agentSchema }),
+  z.object({ type: z.literal("digest.cancel") }),
+  z.object({ type: z.literal("digest.clear") }),
 ]);
 export type Action = z.infer<typeof actionSchema>;

@@ -296,3 +296,16 @@ button.next-cue { cursor: pointer; }
 .organize-ai { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
 .organize-ai h3 { font-size: 13px; font-weight: 500; margin: 0 0 9px; }
 .organize-banner { align-items: center; }
+
+.article-body.font-s .article-html { font-size: 13px; line-height: 1.9; }
+.article-body.font-l .article-html { font-size: 17.5px; line-height: 2; }
+.font-size { background: transparent; border: 0; color: var(--muted); font-size: 11px; cursor: pointer; }
+.font-size:hover { color: var(--secondary); }
+.article-notes { margin-top: 30px; border-top: 1px solid var(--border); padding-top: 14px; font-size: 12px; color: var(--secondary); }
+.article-notes summary { cursor: pointer; color: var(--muted); font-size: 11px; }
+.note-label { display: block; margin-top: 12px; font-size: 11px; color: var(--muted); }
+.note-label textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; background: #ffffff06; border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 12px; line-height: 1.7; padding: 9px 11px; resize: vertical; }
+.highlights { list-style: none; margin: 12px 0; padding: 0; display: grid; gap: 8px; }
+.highlights li { display: flex; align-items: flex-start; gap: 8px; }
+.highlights blockquote { flex: 1; margin: 0; border-left: 2px solid #a3806a; padding: 2px 12px; color: #a9a1ad; font-size: 12px; line-height: 1.7; }
+.digest-result .markdown { margin: 10px 0 16px; font-size: 13px; }
