@@ -30,13 +30,13 @@ describe("feed ingestion", () => {
   });
 
   test("rejects DTDs and invalid feeds", async () => {
-    await expect(parseFeed('<!DOCTYPE rss [<!ENTITY secret SYSTEM "file:///etc/passwd">]><rss/>', "https://example.com/rss", null)).rejects.toThrow("外部エンティティ");
+    await expect(parseFeed('<!DOCTYPE rss [<!ENTITY secret SYSTEM "file:///etc/passwd">]><rss/>', "https://example.com/rss", null)).rejects.toThrow("external entities");
     await expect(parseFeed("<html>no feed</html>", "https://example.com/rss", null)).rejects.toThrow();
   });
 
   test("explains HTML pages are not feeds instead of reporting entities", async () => {
     for (const html of ['<!DOCTYPE html><html><head><title>Site</title></head><body>x</body></html>', '<html lang="ja"><body>site</body></html>', '  \n<!doctype html><html></html>']) {
-      await expect(parseFeed(html, "https://example.com/", null)).rejects.toThrow("RSS/Atomとして読み込めませんでした");
+      await expect(parseFeed(html, "https://example.com/", null)).rejects.toThrow("RSS/Atom");
     }
     await expect(parseFeed('<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body/></html>', "https://example.com/", null)).rejects.toThrow();
   });

@@ -31,7 +31,7 @@ beforeAll(async () => {
   root = createRoot(container as unknown as HTMLElement);
   await act(async () => root.render(<App />));
   const parsed = await parseFeed('<rss version="2.0"><channel><title>Test feed</title><link>https://example.com</link><item><guid>one</guid><title>First article</title><description>First body</description></item><item><guid>two</guid><title>Second article</title><description>Second body</description></item></channel></rss>', "https://example.com/rss", null);
-  snapshot = { state: { version: 1, folders: [], feeds: [parsed.feed], articles: parsed.articles, conversations: [] }, connections: [], refreshing: false };
+  snapshot = { state: { version: 1, language: "en", folders: [], feeds: [parsed.feed], articles: parsed.articles, conversations: [] }, connections: [], refreshing: false };
   await act(async () => { stream?.onopen?.(); stream?.onmessage?.({ data: JSON.stringify({ type: "snapshot", snapshot }) }); });
 });
 afterAll(async () => {
@@ -44,7 +44,7 @@ afterAll(async () => {
 });
 
 test("J/K continue article navigation after a row receives keyboard focus", async () => {
-  const first = window.document.querySelector('[aria-label="未読：First article"]');
+  const first = window.document.querySelector('[aria-label="Unread: First article"]');
   if (!(first instanceof window.HTMLButtonElement)) throw new Error("Missing article row");
   await act(async () => { first?.focus(); first?.click(); });
   expect(window.document.querySelector(".article-body h1")?.textContent).toBe("First article");
@@ -55,7 +55,7 @@ test("J/K continue article navigation after a row receives keyboard focus", asyn
 
 test("typing J into search does not navigate to a different article", async () => {
   const before = window.document.querySelector(".article-body h1")?.textContent;
-  const search = window.document.querySelector('input[aria-label="記事を検索"]');
+  const search = window.document.querySelector("input#article-search");
   if (!(search instanceof window.HTMLInputElement)) throw new Error("Missing search input");
   await act(async () => { search?.focus(); search?.dispatchEvent(new window.KeyboardEvent("keydown", { key: "j", bubbles: true })); });
   expect(window.document.querySelector(".article-body h1")?.textContent).toBe(before);
@@ -66,13 +66,13 @@ test("an authentication-waiting conversation can be cancelled from the panel", a
   if (!article) throw new Error("Missing fixture article");
   snapshot.state.conversations.push({ id: "waiting", articleId: article.id, agent: "codex", source: { title: article.title, url: article.url, text: article.text, capturedAt: article.receivedAt }, messages: [{ id: "answer", role: "assistant", text: "", createdAt: article.receivedAt, state: { status: "waiting", reason: "Log in first" } }] });
   await act(async () => stream?.onmessage?.({ data: JSON.stringify({ type: "snapshot", snapshot }) }));
-  const first = window.document.querySelector('[aria-label="未読：First article"]');
+  const first = window.document.querySelector('[aria-label="Unread: First article"]');
   if (!(first instanceof window.HTMLButtonElement)) throw new Error("Missing article row");
   await act(async () => first.click());
   const toggle = window.document.querySelector(".ai-toggle");
   if (!(toggle instanceof window.HTMLButtonElement)) throw new Error("Missing AI toggle");
   await act(async () => toggle.click());
-  const cancel = window.document.querySelector('[aria-label="確認待ちを中止"]');
+  const cancel = window.document.querySelector('[aria-label="Cancel"]');
   expect(cancel instanceof window.HTMLButtonElement).toBe(true);
   if (!(cancel instanceof window.HTMLButtonElement)) return;
   await act(async () => cancel.click());
@@ -91,12 +91,12 @@ test("the conversation list shows the failure reason instead of claiming it is s
 test("summarizes in the article area, shows the supplied source and restores the excerpt", async () => {
   const article = snapshot.state.articles[1];
   if (!article) throw new Error("Missing fixture article");
-  const close = window.document.querySelector('[aria-label="AIパネルを閉じる"]');
+  const close = window.document.querySelector('[aria-label="Close AI panel"]');
   if (close instanceof window.HTMLButtonElement) await act(async () => close.click());
-  const row = window.document.querySelector('[aria-label="未読：Second article"]');
+  const row = window.document.querySelector('[aria-label="Unread: Second article"]');
   if (!(row instanceof window.HTMLButtonElement)) throw new Error("Missing row");
   await act(async () => row.click());
-  const button = window.document.querySelector('[aria-label="記事を要約"]');
+  const button = window.document.querySelector('[aria-label="Summarize article"]');
   expect(button instanceof window.HTMLButtonElement).toBe(true);
   if (!(button instanceof window.HTMLButtonElement)) return;
   await act(async () => button.click());
@@ -105,15 +105,15 @@ test("summarizes in the article area, shows the supplied source and restores the
   snapshot.state.conversations.push({ id: "summary", articleId: article.id, agent: "codex", source: { title: article.title, url: article.url, text: "Complete body including the final conclusion.", origin: "web", capturedAt: article.receivedAt }, messages: [{ id: "summary-answer", role: "assistant", purpose: "summary", sourceOrigin: "web", text: "## 要点\n全文に基づく要約。[危険](javascript:alert(1)) ![tracking](https://example.com/track.png)<script>alert(1)</script>", createdAt: article.receivedAt, state: { status: "completed" } }] });
   await act(async () => stream?.onmessage?.({ data: JSON.stringify({ type: "snapshot", snapshot }) }));
   expect(window.document.querySelector(".reader-summary")?.textContent).toContain("全文に基づく要約");
-  expect(window.document.querySelector(".reader-summary")?.textContent).toContain("リンク先本文");
+  expect(window.document.querySelector(".reader-summary")?.textContent).toContain("Linked article");
   expect(window.document.querySelector(".reader-summary details")?.textContent).toContain("final conclusion");
   expect(window.document.querySelector(".reader-summary img, .reader-summary script, .reader-summary a[href^='javascript:']")).toBeNull();
   expect(window.document.querySelector(".article-html")).toBeNull();
-  const back = window.document.querySelector('[aria-label="フィード本文に戻る"]');
+  const back = window.document.querySelector('[aria-label="Back to feed text"]');
   if (!(back instanceof window.HTMLButtonElement)) throw new Error("Missing back button");
   await act(async () => back.click());
   expect(window.document.querySelector(".article-html")?.textContent).toBe("Second body");
-  const again = window.document.querySelector('[aria-label="記事を要約"]');
+  const again = window.document.querySelector('[aria-label="Summarize article"]');
   if (!(again instanceof window.HTMLButtonElement)) throw new Error("Missing summary button");
   const count = actions.length;
   await act(async () => again.click());
@@ -124,7 +124,7 @@ test("summarizes in the article area, shows the supplied source and restores the
 test("a removed feed disappears from reading views and can be restored with its articles", async () => {
   const feed = snapshot.state.feeds[0];
   if (!feed) throw new Error("Missing feed fixture");
-  const remove = window.document.querySelector('[aria-label="Test feedを削除"]');
+  const remove = window.document.querySelector('[aria-label="Remove Test feed"]');
   if (!(remove instanceof window.HTMLButtonElement)) throw new Error("Missing remove control");
   await act(async () => remove.click());
   expect(actions.at(-1)).toEqual({ type: "feed.remove", id: feed.id });
@@ -133,7 +133,7 @@ test("a removed feed disappears from reading views and can be restored with its 
   expect(window.document.querySelectorAll(".article-row")).toHaveLength(0);
   expect(window.document.querySelector(".article-body")).toBeNull();
   expect(window.document.querySelector(".sidebar .feed-row")).toBeNull();
-  const restore = window.document.querySelector('[aria-label="Test feedを復元"]');
+  const restore = window.document.querySelector('[aria-label="Restore Test feed"]');
   if (!(restore instanceof window.HTMLButtonElement)) throw new Error("Missing restore control");
   await act(async () => restore.click());
   expect(actions.at(-1)).toEqual({ type: "feed.restore", id: feed.id });
@@ -158,7 +158,7 @@ test("OPML controls upload a selected file, display per-feed results, and stop a
   expect(actions.at(-1)).toEqual({ type: "opml.preview", xml });
   snapshot.opmlPreview = { entries: [{ url: "https://example.org/rss", title: "Imported", folderName: null, resolution: "new" }], missingFeeds: [] };
   await act(async () => stream?.onmessage?.({ data: JSON.stringify({ type: "snapshot", snapshot }) }));
-  const apply = [...window.document.querySelectorAll('#opml-dialog button')].find((button) => button.textContent?.includes("を読み込む"));
+  const apply = [...window.document.querySelectorAll('#opml-dialog button')].find((button) => button.textContent?.includes("Import"));
   if (!(apply instanceof window.HTMLButtonElement)) throw new Error("Missing OPML apply control");
   await act(async () => apply.click());
   expect(actions.at(-1)).toEqual({ type: "opml.import", xml, urls: ["https://example.org/rss"] });
@@ -168,7 +168,7 @@ test("OPML controls upload a selected file, display per-feed results, and stop a
   expect(window.document.querySelector('#opml-dialog')?.textContent).toContain("登録済みです。");
   expect(window.document.querySelector('#opml-dialog')?.textContent).toContain("公開HTTP/HTTPS");
   expect(window.document.querySelector('#opml-dialog progress')?.getAttribute('value')).toBe("2");
-  const stop = window.document.querySelector('[aria-label="OPMLの読み込みを中止"]');
+  const stop = window.document.querySelector('[aria-label="Stop the OPML import"]');
   if (!(stop instanceof window.HTMLButtonElement)) throw new Error("Missing OPML stop control");
   await act(async () => stop.click());
   expect(actions.at(-1)).toEqual({ type: "opml.stop" });
@@ -203,17 +203,17 @@ test("OPML preview applies only selected feeds and removes missing ones after co
   const feedB = boxes[1];
   if (!(feedB instanceof window.HTMLInputElement)) throw new Error("Missing checkbox");
   await act(async () => feedB.click());
-  const apply = [...dialog.querySelectorAll("button")].find((button) => button.textContent?.includes("を読み込む"));
+  const apply = [...dialog.querySelectorAll("button")].find((button) => button.textContent?.includes("Import"));
   if (!(apply instanceof window.HTMLButtonElement)) throw new Error("Missing apply button");
   await act(async () => apply.click());
   expect(actions.at(-1)).toEqual({ type: "opml.import", xml, urls: ["https://a.example.com/rss"], folders: { "https://a.example.com/rss": "Tech" } });
   const missingBox = dialog.querySelector(".opml-missing input[type=checkbox]");
   if (!(missingBox instanceof window.HTMLInputElement)) throw new Error("Missing missing-feed checkbox");
   await act(async () => missingBox.click());
-  const remove = [...dialog.querySelectorAll("button")].find((button) => button.textContent?.includes("件を削除"));
+  const remove = [...dialog.querySelectorAll("button")].find((button) => button.textContent?.includes("Remove") && button.textContent?.includes("selected"));
   if (!(remove instanceof window.HTMLButtonElement)) throw new Error("Missing remove button");
   await act(async () => remove.click());
-  const confirm = [...dialog.querySelectorAll("button")].find((button) => button.textContent === "削除する");
+  const confirm = [...dialog.querySelectorAll("button")].find((button) => button.textContent === "Remove");
   if (!(confirm instanceof window.HTMLButtonElement)) throw new Error("Missing confirm button");
   await act(async () => confirm.click());
   expect(actions.at(-1)).toEqual({ type: "feed.remove", id: "feed-missing" });
@@ -227,7 +227,7 @@ test("organize dialog proposes an AI plan and applies the selected moves", async
   if (!(dialog instanceof window.HTMLElement)) throw new Error("Missing organize dialog");
   snapshot.connections = [{ agent: "codex", installed: true, status: "ready", detail: "fixture" }];
   await act(async () => stream?.onmessage?.({ data: JSON.stringify({ type: "snapshot", snapshot }) }));
-  const propose = [...dialog.querySelectorAll("button")].find((button) => button.textContent?.includes("AIに整理案を作成"));
+  const propose = [...dialog.querySelectorAll("button")].find((button) => button.textContent?.includes("AI plan"));
   if (!(propose instanceof window.HTMLButtonElement)) throw new Error("Missing propose button");
   await act(async () => propose.click());
   expect(actions.at(-1)).toEqual({ type: "organize.propose", agent: "codex", scope: "library" });
@@ -239,7 +239,7 @@ test("organize dialog proposes an AI plan and applies the selected moves", async
   if (!(move instanceof window.HTMLInputElement)) throw new Error("Missing move checkbox");
   expect(move.checked).toBe(true);
   expect(dialog.querySelector(".organize-ai .opml-entry-detail")?.textContent).toContain("Tech");
-  const apply = [...dialog.querySelectorAll("button")].find((button) => button.textContent?.includes("件を適用"));
+  const apply = [...dialog.querySelectorAll("button")].find((button) => button.textContent?.includes("Apply") && button.textContent?.includes("selected"));
   if (!(apply instanceof window.HTMLButtonElement)) throw new Error("Missing apply button");
   await act(async () => apply.click());
   expect(actions.at(-1)).toEqual({ type: "organize.apply", moves: [{ feedId: feed.id, folderName: "Tech" }] });
@@ -252,14 +252,14 @@ test("OPML preview asks AI for folder assignments and applies them", async () =>
   if (!(dialog instanceof window.HTMLElement)) throw new Error("Missing OPML dialog");
   snapshot.opmlPreview = { entries: [{ url: "https://a.example.com/rss", title: "Feed A", folderName: null, resolution: "new" }], missingFeeds: [] };
   await act(async () => stream?.onmessage?.({ data: JSON.stringify({ type: "snapshot", snapshot }) }));
-  const suggest = [...dialog.querySelectorAll("button")].find((button) => button.textContent?.includes("AIにフォルダ分け"));
+  const suggest = [...dialog.querySelectorAll("button")].find((button) => button.textContent?.includes("AI folder"));
   if (!(suggest instanceof window.HTMLButtonElement)) throw new Error("Missing suggest button");
   await act(async () => suggest.click());
   expect(actions.at(-1)).toEqual({ type: "organize.propose", agent: "codex", scope: "opml" });
   snapshot.organize = { scope: "opml", agent: "codex", status: "completed", startedAt: new Date().toISOString(), plan: { moves: [], assignments: [{ url: "https://a.example.com/rss", title: "Feed A", folderName: "News" }] } };
   await act(async () => stream?.onmessage?.({ data: JSON.stringify({ type: "snapshot", snapshot }) }));
-  expect(dialog.textContent).toContain("フォルダ割り当て");
-  const apply = [...dialog.querySelectorAll(".organize-banner button")].find((button) => button.textContent === "適用");
+  expect(dialog.textContent).toContain("assignments");
+  const apply = [...dialog.querySelectorAll(".organize-banner button")].find((button) => button.textContent === "Apply");
   if (!(apply instanceof window.HTMLButtonElement)) throw new Error("Missing apply button");
   await act(async () => apply.click());
   expect(actions.at(-1)).toEqual({ type: "organize.apply", assignments: [{ url: "https://a.example.com/rss", folderName: "News" }] });

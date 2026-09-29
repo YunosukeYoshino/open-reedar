@@ -46,13 +46,13 @@ describe("agent protocol", () => {
 
   test("unexpected process exit rejects a pending request instead of hanging", async () => {
     const rpc = new RpcClient(process.execPath, ["-e", "process.stdin.once('data',()=>process.exit(1))"], directory);
-    try { await expect(rpc.request("test", {})).rejects.toThrow("接続が終了"); }
+    try { await expect(rpc.request("test", {})).rejects.toThrow("ended"); }
     finally { rpc.close(); }
   });
 
   test("missing response has a bounded timeout", async () => {
     const rpc = new RpcClient(process.execPath, ["-e", "process.stdin.resume()"], directory);
-    try { await expect(rpc.request("test", {}, 30)).rejects.toThrow("タイムアウト"); }
+    try { await expect(rpc.request("test", {}, 30)).rejects.toThrow("timed out"); }
     finally { rpc.close(); }
   });
 
@@ -96,7 +96,7 @@ describe("agent protocol", () => {
           send({method:"turn/completed",params:{turn:{status:"completed"}}});
         }
       });`;
-    await expect(runCodex(process.execPath, "要約して", directory, new AbortController().signal, () => {}, ["-e", script])).rejects.toThrow("指定したモデル");
+    await expect(runCodex(process.execPath, "要約して", directory, new AbortController().signal, () => {}, ["-e", script])).rejects.toThrow("GPT-6-Luna");
   });
 });
 
@@ -131,11 +131,11 @@ describe("reading context", () => {
     expect(prompt).toMatchObject({ question: "根拠を説明して", source: { text: conversation.source.text }, history: [{ role: "user", text: "要約して" }, { role: "assistant", text: "要約" }] });
   });
   test("oversized input fails explicitly instead of silently truncating the article", () => {
-    expect(() => readerPrompt({ ...conversation, source: { ...conversation.source, text: "a".repeat(180_001) } }, "要約して")).toThrow("長すぎます");
+    expect(() => readerPrompt({ ...conversation, source: { ...conversation.source, text: "a".repeat(180_001) } }, "要約して")).toThrow("too long");
   });
   test("shows actionable errors without exposing raw subprocess secrets or local paths", () => {
-    expect(agentError(new Error("Authorization failed: sk-secret at /private/path"))).toContain("認証");
-    expect(agentError(new Error("429 rate_limit"))).toContain("利用上限");
+    expect(agentError(new Error("Authorization failed: sk-secret at /private/path"))).toContain("authentication");
+    expect(agentError(new Error("429 rate_limit"))).toContain("usage limit");
     expect(agentError(new Error("unexpected sk-secret /private/path"))).not.toMatch(/sk-secret|private/);
   });
 });

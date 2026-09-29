@@ -36,7 +36,7 @@ describe("reedar cli", () => {
     const path = await seed("feeds");
     const { code, text } = await run(path, ["feeds"]);
     expect(code).toBe(0);
-    expect(text).toContain("● Test Feed [Tech] 未読1/2");
+    expect(text).toContain("● Test Feed [Tech] 1/2 unread");
     expect(text).toContain("https://example.com/rss");
   });
 
@@ -77,10 +77,10 @@ describe("reedar cli", () => {
     const found = await run(path, ["article", id]);
     expect(found.code).toBe(0);
     expect(found.text).toContain("Unread Story");
-    expect(found.text).toContain("未読");
+    expect(found.text).toContain("unread");
     const missing = await run(path, ["article", "zzz-nope"]);
     expect(missing.code).toBe(1);
-    expect(missing.errors).toContain("記事が見つかりません");
+    expect(missing.errors).toContain("Article not found");
     expect(missing.text).toBe("");
   });
 
@@ -101,7 +101,7 @@ describe("reedar cli", () => {
   test("reports unreadable library", async () => {
     const { code, errors } = await run(join(directory, "missing", "reader.json"), ["feeds"]);
     expect(code).toBe(1);
-    expect(errors).toContain("ライブラリを読み込めませんでした");
+    expect(errors).toContain("Could not read the library");
   });
 });
 

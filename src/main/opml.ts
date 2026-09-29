@@ -1,7 +1,8 @@
 import { parseStringPromise } from "xml2js";
 import { z } from "zod";
-import type { Feed, ReaderState } from "../shared/schema";
+import type { Feed, Language, ReaderState } from "../shared/schema";
 import { plainText } from "./feeds";
+import { t } from "../shared/i18n";
 
 const outlineSchema = z.object({ $: z.record(z.string(), z.string()).optional(), outline: z.array(z.unknown()).optional() });
 const documentSchema = z.object({ opml: z.object({
@@ -11,14 +12,14 @@ const documentSchema = z.object({ opml: z.object({
 
 type Entry = { title: string; url: string; folderName: string | null };
 
-export async function parseOpml(xml: string): Promise<Entry[]> {
-  if (Buffer.byteLength(xml, "utf8") > 262_144) throw new Error("OPMLファイルは256KB以下にしてください。");
-  if (/<!DOCTYPE|<!ENTITY/i.test(xml)) throw new Error("外部エンティティを含むOPMLには対応していません。");
+export async function parseOpml(xml: string, lang: Language = "en"): Promise<Entry[]> {
+  if (Buffer.byteLength(xml, "utf8") > 262_144) throw new Error(t(lang, "err.opmlSize"));
+  if (/<!DOCTYPE|<!ENTITY/i.test(xml)) throw new Error(t(lang, "err.opmlEntity"));
   let parsed: unknown;
   try { parsed = await parseStringPromise(xml, { strict: true, explicitArray: true }); }
-  catch { throw new Error("OPMLのXML形式が正しくありません。"); }
+  catch { throw new Error(t(lang, "err.opmlXml")); }
   const document = documentSchema.safeParse(parsed);
-  if (!document.success) throw new Error("OPML 1.0 / 1.1 / 2.0のファイルを選択してください。");
+  if (!document.success) throw new Error(t(lang, "err.opmlVersion"));
   const body = document.data.opml.body[0];
   const roots = typeof body === "object" ? body.outline ?? [] : [];
   const pending: { value: unknown; folders: string[]; depth: number }[] = roots.toReversed().map((value) => ({ value, folders: [], depth: 0 }));
@@ -27,9 +28,9 @@ export async function parseOpml(xml: string): Promise<Entry[]> {
   while (pending.length) {
     const item = pending.pop();
     if (!item) break;
-    if (++nodes > 2000 || item.depth > 16) throw new Error("OPMLの階層または項目数が多すぎます。");
+    if (++nodes > 2000 || item.depth > 16) throw new Error(t(lang, "err.opmlDeep"));
     const node = outlineSchema.safeParse(item.value);
-    if (!node.success) throw new Error("OPMLのoutline形式が正しくありません。");
+    if (!node.success) throw new Error(t(lang, "err.opmlOutline"));
     const attributes = node.data.$ ?? {};
     // External OPML inclusions and ordinary link outlines are never followed.
     if (attributes.isComment === "true" || attributes.type === "link" || attributes.type === "include") continue;
@@ -37,7 +38,7 @@ export async function parseOpml(xml: string): Promise<Entry[]> {
     const url = attributes.xmlUrl;
     if (url) {
       entries.push({ title: title || url, url: url.trim(), folderName: item.folders.length ? item.folders.join(" / ") : null });
-      if (entries.length > 200) throw new Error("一度に読み込めるフィードは200件までです。");
+      if (entries.length > 200) throw new Error(t(lang, "err.opmlMany"));
     }
     const folders = !url && title ? [...item.folders, title] : item.folders;
     for (const value of (node.data.outline ?? []).toReversed()) pending.push({ value, folders, depth: item.depth + 1 });

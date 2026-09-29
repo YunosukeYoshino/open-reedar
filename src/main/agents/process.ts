@@ -7,7 +7,8 @@ import { delimiter, join } from "node:path";
 import { createInterface } from "node:readline";
 import { parse } from "smol-toml";
 import { z } from "zod";
-import type { Agent } from "../../shared/schema";
+import type { Agent, Language } from "../../shared/schema";
+import { t } from "../../shared/i18n";
 
 export function agentEnvironment() {
   const env: NodeJS.ProcessEnv = {};
@@ -31,10 +32,10 @@ export async function executable(agent: Agent) {
     try { await access(path, constants.X_OK); return path; }
     catch { /* Try the next installed executable. */ }
   }
-  throw new Error(`${agent === "codex" ? "Codex" : agent === "claude" ? "Claude Code" : "Antigravity"} CLIが見つかりません。`);
+  throw new Error(t("en", "err.cliMissing", { name: agent === "codex" ? "Codex" : agent === "claude" ? "Claude Code" : "Antigravity" }));
 }
 
-export async function codexArguments(configPath = join(process.env.CODEX_HOME || join(homedir(), ".codex"), "config.toml")) {
+export async function codexArguments(configPath = join(process.env.CODEX_HOME || join(homedir(), ".codex"), "config.toml"), lang: Language = "en") {
   const args = ["app-server", "--stdio"];
   const settings = [
     "model_provider=\"openai\"", "features.shell_tool=false", "features.unified_exec=false",
@@ -51,7 +52,7 @@ export async function codexArguments(configPath = join(process.env.CODEX_HOME ||
     }
   } catch (error) {
     if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
-      throw new Error("Codex設定を安全に読み込めませんでした。CLIの設定を確認してください。", { cause: error });
+      throw new Error(t(lang, "err.codexConfig"), { cause: error });
     }
   }
   for (const setting of settings) args.push("-c", setting);
@@ -99,7 +100,10 @@ export class RpcClient {
   private closed = false;
   readonly process: ChildProcessWithoutNullStreams;
 
-  constructor(path: string, args: string[], cwd: string) {
+  private readonly lang: Language;
+
+  constructor(path: string, args: string[], cwd: string, lang: Language = "en") {
+    this.lang = lang;
     this.process = launch(path, args, cwd);
     const lines = createInterface({ input: this.process.stdout });
     lines.on("line", (line) => {
@@ -116,8 +120,8 @@ export class RpcClient {
         }
       } else for (const listener of this.listeners) listener(message);
     });
-    this.process.on("error", () => this.fail("エージェントを起動できませんでした。"));
-    this.process.on("close", () => this.fail("エージェントとの接続が終了しました。"));
+    this.process.on("error", () => this.fail(t(this.lang, "err.agentStart")));
+    this.process.on("close", () => this.fail(t(this.lang, "err.agentClosed")));
   }
 
   private fail(message: string) {
@@ -129,14 +133,14 @@ export class RpcClient {
   subscribe(listener: (message: RpcMessage) => void) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
 
   send(value: unknown) {
-    if (this.closed) throw new Error("エージェントとの接続が終了しています。");
+    if (this.closed) throw new Error(t(this.lang, "err.connectionClosed"));
     this.process.stdin.write(`${JSON.stringify(value)}\n`);
   }
 
   request(method: string, params: unknown, timeout = 20_000): Promise<unknown> {
     const id = ++this.nextId;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error("エージェントの応答がタイムアウトしました。")); }, timeout);
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(t(this.lang, "err.agentTimeout"))); }, timeout);
       this.pending.set(id, { resolve, reject, timer });
       try { this.send({ id, method, params }); }
       catch (error) { clearTimeout(timer); this.pending.delete(id); reject(error); }
@@ -148,5 +152,5 @@ export class RpcClient {
     this.send({ method: "initialized", params: {} });
   }
 
-  close() { this.fail("接続を終了しました。"); terminate(this.process); }
+  close() { this.fail(t(this.lang, "err.connectionClosed")); terminate(this.process); }
 }

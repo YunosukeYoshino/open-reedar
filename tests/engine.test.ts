@@ -122,7 +122,7 @@ describe("reading workflow", () => {
     await engine.dispatch({ type: "chat.summarize", articleId: article.id, agent: "codex" });
     await engine.settle();
     expect(runs).toBe(0);
-    expect(store.state.conversations[0]?.messages.at(-1)).toMatchObject({ state: { status: "failed", error: "記事本文を取得できませんでした。原文を開いて確認してください。" } });
+    expect(store.state.conversations[0]?.messages.at(-1)).toMatchObject({ state: { status: "failed", error: "Could not fetch the article text. Open the original to read it." } });
     await engine.close();
   });
 
@@ -139,7 +139,7 @@ describe("reading workflow", () => {
     await ready;
     const conversation = store.state.conversations[0];
     if (!conversation) throw new Error("conversation missing");
-    await expect(engine.dispatch({ type: "chat.send", articleId: article.id, agent: "codex", text: "Duplicate" })).rejects.toThrow("実行中");
+    await expect(engine.dispatch({ type: "chat.send", articleId: article.id, agent: "codex", text: "Duplicate" })).rejects.toThrow("This conversation is running");
     await engine.dispatch({ type: "chat.stop", conversationId: conversation.id });
     await engine.settle();
     expect((await Store.open(path)).state.conversations[0]?.messages.at(-1)).toMatchObject({ text: "Partial answer", state: { status: "cancelled" } });
@@ -256,7 +256,7 @@ describe("reading workflow", () => {
     });
     await engine.dispatch({ type: "opml.import", xml: '<opml version="2.0"><head/><body><outline text="Late" xmlUrl="https://example.com/rss"/></body></opml>' });
     await ready;
-    await expect(engine.dispatch({ type: "opml.import", xml: '<opml version="2.0"><head/><body/></opml>' })).rejects.toThrow("実行中");
+    await expect(engine.dispatch({ type: "opml.import", xml: '<opml version="2.0"><head/><body/></opml>' })).rejects.toThrow("An OPML import is running");
     await engine.dispatch({ type: "opml.stop" });
     await engine.settle();
     expect(engine.snapshot.opmlImport?.status).toBe("cancelled");
@@ -290,7 +290,7 @@ describe("reading workflow", () => {
     });
     await engine.dispatch({ type: "organize.propose", agent: "codex", scope: "library" });
     await engine.settle();
-    expect(engine.snapshot.organize).toMatchObject({ status: "failed", detail: "整理案を解釈できませんでした。もう一度お試しください。" });
+    expect(engine.snapshot.organize).toMatchObject({ status: "failed", detail: "Could not interpret the plan. Please try again." });
     await engine.dispatch({ type: "organize.clear" });
     expect(engine.snapshot.organize).toBeNull();
     await engine.close();
@@ -301,7 +301,7 @@ describe("reading workflow", () => {
       emit({ type: "delta", text: `{"assignments":[{"url":"https://a.example.com/rss","folder":"News"},{"url":"https://unknown.example.com/rss","folder":"X"}]}` });
     });
     const opml = `<opml version="2.0"><body><outline text="A" xmlUrl="https://a.example.com/rss"/><outline text="B" xmlUrl="https://b.example.com/rss"/></body></opml>`;
-    await expect(engine.dispatch({ type: "organize.propose", agent: "codex", scope: "opml" })).rejects.toThrow("プレビュー");
+    await expect(engine.dispatch({ type: "organize.propose", agent: "codex", scope: "opml" })).rejects.toThrow("preview");
     await engine.dispatch({ type: "opml.preview", xml: opml });
     await engine.dispatch({ type: "organize.propose", agent: "codex", scope: "opml" });
     await engine.settle();
@@ -309,7 +309,7 @@ describe("reading workflow", () => {
     await engine.dispatch({ type: "organize.apply", assignments: engine.snapshot.organize?.plan?.assignments ?? [] });
     const entry = engine.snapshot.opmlPreview?.entries.find((item) => item.url === "https://a.example.com/rss");
     expect(entry?.folderName).toBe("News");
-    expect(entry?.detail).toBe("フォルダ「News」を作成します。");
+    expect(entry?.detail).toBe("Folder “News” will be created.");
     expect(engine.snapshot.organize).toBeNull();
     const folders = Object.fromEntries((engine.snapshot.opmlPreview?.entries ?? []).flatMap((item) => item.folderName ? [[item.url, item.folderName]] : []));
     await engine.dispatch({ type: "opml.import", xml: opml, urls: ["https://a.example.com/rss"], folders });
@@ -344,7 +344,7 @@ describe("reading workflow", () => {
     expect(store.state.folders).toHaveLength(0);
     expect(store.state.feeds[0]?.folderId).toBeNull();
     expect((await Store.open(path)).state.feeds[0]?.folderId).toBeNull();
-    await expect(engine.dispatch({ type: "folder.remove", id: folder?.id ?? "" })).rejects.toThrow("フォルダが見つかりません。");
+    await expect(engine.dispatch({ type: "folder.remove", id: folder?.id ?? "" })).rejects.toThrow("Folder not found.");
     await engine.close();
   });
 

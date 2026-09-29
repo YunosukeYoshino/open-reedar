@@ -8,6 +8,7 @@ import { Engine } from "./engine";
 import { fetchPublic } from "./network";
 import { serializeOpml } from "./opml";
 import { Store } from "./store";
+import { t } from "../shared/i18n";
 
 type Options = { dataDirectory: string; staticDirectory: string; port?: number; engine?: Engine };
 const csp = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
@@ -29,9 +30,9 @@ export async function requestBody(request: AsyncIterable<unknown>, maximumBytes 
   const chunks: Buffer[] = [];
   let length = 0;
   for await (const chunk of request) {
-    if (!Buffer.isBuffer(chunk)) throw new Error("入力形式が正しくありません。");
+    if (!Buffer.isBuffer(chunk)) throw new Error(t("en", "err.badInput"));
     length += chunk.length;
-    if (length > maximumBytes) throw new Error("入力が大きすぎます。");
+    if (length > maximumBytes) throw new Error(t("en", "err.inputTooLarge"));
     chunks.push(chunk);
   }
   return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
@@ -53,14 +54,14 @@ export async function startServer(options: Options) {
     response.setHeader("Cache-Control", "no-store");
     void handle(request, response).catch((error: unknown) => {
       if (response.headersSent) { response.end(); return; }
-      json(response, 400, { error: error instanceof Error ? error.message : "処理に失敗しました。" });
+      json(response, 400, { error: error instanceof Error ? error.message : t(store.state.language, "err.requestFailed") });
     });
   });
   server.requestTimeout = 30_000;
   server.headersTimeout = 10_000;
 
   async function handle(request: IncomingMessage, response: ServerResponse) {
-    if (!origin || request.headers.host !== new URL(origin).host) return json(response, 403, { error: "許可されていない接続です。" });
+    if (!origin || request.headers.host !== new URL(origin).host) return json(response, 403, { error: t(store.state.language, "err.forbiddenHost") });
     const url = new URL(request.url ?? "/", origin);
     if (request.method === "GET" && url.pathname === "/" && matchesToken(url.searchParams.get("key") ?? undefined, token)) {
       response.writeHead(303, { Location: "/", "Set-Cookie": `reedar_session=${token}; HttpOnly; SameSite=Strict; Path=/` });
@@ -68,8 +69,8 @@ export async function startServer(options: Options) {
       return;
     }
     const cookie = request.headers.cookie?.split(";").map((value) => value.trim()).find((value) => value.startsWith("reedar_session="))?.slice("reedar_session=".length);
-    if (!matchesToken(cookie, token)) return json(response, 401, { error: "Reedarを起動したときのURLから開いてください。" });
-    if (request.headers.origin && request.headers.origin !== origin) return json(response, 403, { error: "外部ページからの操作は許可されていません。" });
+    if (!matchesToken(cookie, token)) return json(response, 401, { error: t(store.state.language, "err.openFromLaunchUrl") });
+    if (request.headers.origin && request.headers.origin !== origin) return json(response, 403, { error: t(store.state.language, "err.externalAction") });
 
     if (request.method === "GET" && url.pathname === "/api/state") return json(response, 200, engine.snapshot);
     if (request.method === "GET" && url.pathname === "/api/opml") {
@@ -78,9 +79,9 @@ export async function startServer(options: Options) {
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/action") {
-      if (request.headers.origin !== origin || !request.headers["content-type"]?.startsWith("application/json")) return json(response, 403, { error: "この操作はReedarの画面から実行してください。" });
+      if (request.headers.origin !== origin || !request.headers["content-type"]?.startsWith("application/json")) return json(response, 403, { error: t(store.state.language, "err.externalAction") });
       const result = actionSchema.safeParse(await requestBody(request, 1024 * 1024));
-      if (!result.success) return json(response, 400, { error: "入力内容を確認してください。" });
+      if (!result.success) return json(response, 400, { error: t(store.state.language, "err.checkInput") });
       await engine.dispatch(result.data);
       return json(response, 200, { ok: true });
     }
@@ -99,12 +100,12 @@ export async function startServer(options: Options) {
     if (request.method === "GET" && url.pathname === "/image") {
       const image = url.searchParams.get("url") ?? "";
       const encoded = `/image?url=${encodeURIComponent(image)}`;
-      if (!image || image.length > 2048 || !store.state.articles.some((article) => article.imageUrl === image || article.html.includes(encoded))) return json(response, 404, { error: "画像が見つかりません。" });
+      if (!image || image.length > 2048 || !store.state.articles.some((article) => article.imageUrl === image || article.html.includes(encoded))) return json(response, 404, { error: t(store.state.language, "err.imageMissing") });
       let result = images.get(image);
       if (!result) {
-        const fetched = await fetchPublic(image);
+        const fetched = await fetchPublic(image, 0, undefined, store.state.language);
         const contentType = fetched.contentType.split(";")[0]?.trim() ?? "";
-        if (!["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"].includes(contentType)) return json(response, 415, { error: "対応していない画像形式です。" });
+        if (!["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"].includes(contentType)) return json(response, 415, { error: t(store.state.language, "err.imageType") });
         result = { body: fetched.body, contentType };
         while (imageBytes + result.body.length > 16 * 1024 * 1024 && images.size) {
           const oldest = images.entries().next().value;
@@ -119,16 +120,16 @@ export async function startServer(options: Options) {
       response.end(result.body);
       return;
     }
-    if (request.method !== "GET") return json(response, 405, { error: "対応していない操作です。" });
+    if (request.method !== "GET") return json(response, 405, { error: t(store.state.language, "err.methodNotAllowed") });
     const root = resolve(options.staticDirectory);
     const filename = url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname.slice(1));
     const path = resolve(root, filename);
-    if (!path.startsWith(root + sep)) return json(response, 403, { error: "アクセスできません。" });
+    if (!path.startsWith(root + sep)) return json(response, 403, { error: t(store.state.language, "err.accessDenied") });
     try {
       const body = await readFile(path);
       response.writeHead(200, { "Content-Type": contentTypes[extname(path)] ?? "application/octet-stream" });
       response.end(body);
-    } catch { json(response, 404, { error: "ページが見つかりません。" }); }
+    } catch { json(response, 404, { error: t(store.state.language, "err.pageMissing") }); }
   }
 
   await new Promise<void>((resolve, reject) => {
@@ -136,7 +137,7 @@ export async function startServer(options: Options) {
     server.listen(options.port ?? 0, "127.0.0.1", () => resolve());
   });
   const address = server.address();
-  if (!address || typeof address === "string") throw new Error("ローカルサーバーを起動できませんでした。");
+  if (!address || typeof address === "string") throw new Error(t(store.state.language, "err.listenFailed"));
   origin = `http://127.0.0.1:${address.port}`;
   if (!options.engine) void engine.initialize().catch(() => {});
   return {

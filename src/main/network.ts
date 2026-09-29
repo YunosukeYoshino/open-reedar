@@ -2,23 +2,25 @@ import { lookup } from "node:dns/promises";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import ipaddr from "ipaddr.js";
+import { t } from "../shared/i18n";
+import type { Language } from "../shared/schema";
 
 const MAX_BYTES = 5 * 1024 * 1024;
 
-export function publicUrl(value: string) {
+export function publicUrl(value: string, lang: Language = "en") {
   const url = new URL(value);
   if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) {
-    throw new Error("認証情報を含まないHTTPまたはHTTPSのURLを入力してください。");
+    throw new Error(t(lang, "err.badUrlAuth"));
   }
   if (url.port && !["80", "443"].includes(url.port)) {
-    throw new Error("フィードは標準のHTTP/HTTPSポートに対応しています。");
+    throw new Error(t(lang, "err.nonStandardPort"));
   }
   const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || !host.includes(".")) {
-    throw new Error("ローカルネットワークのURLにはアクセスできません。");
+    throw new Error(t(lang, "err.localUrl"));
   }
   if (ipaddr.isValid(host) && !isPublicAddress(host)) {
-    throw new Error("ローカルネットワークのURLにはアクセスできません。");
+    throw new Error(t(lang, "err.localUrl"));
   }
   url.hash = "";
   return url;
@@ -29,16 +31,16 @@ export function isPublicAddress(address: string) {
   catch { return false; }
 }
 
-export async function fetchPublic(value: string, redirects = 0, signal?: AbortSignal): Promise<{ body: Buffer; url: string; contentType: string }> {
+export async function fetchPublic(value: string, redirects = 0, signal?: AbortSignal, lang: Language = "en"): Promise<{ body: Buffer; url: string; contentType: string }> {
   signal?.throwIfAborted();
-  const url = publicUrl(value);
+  const url = publicUrl(value, lang);
   const addresses = await lookup(url.hostname.replace(/^\[|\]$/g, ""), { all: true });
   signal?.throwIfAborted();
   if (addresses.length === 0 || addresses.some((address) => !isPublicAddress(address.address))) {
-    throw new Error("このURLは公開インターネット上の配信元ではありません。");
+    throw new Error(t(lang, "err.notPublic"));
   }
   const address = addresses[0];
-  if (!address) throw new Error("配信元のアドレスを解決できません。");
+  if (!address) throw new Error(t(lang, "err.resolveFailed"));
 
   return new Promise((resolve, reject) => {
     // Pin the validated address so DNS cannot change between validation and connection.
@@ -52,27 +54,27 @@ export async function fetchPublic(value: string, redirects = 0, signal?: AbortSi
     }, (response) => {
       if (response.statusCode && [301, 302, 303, 307, 308].includes(response.statusCode)) {
         response.resume();
-        if (redirects >= 4 || !response.headers.location) return reject(new Error("リダイレクト先を取得できません。"));
+        if (redirects >= 4 || !response.headers.location) return reject(new Error(t(lang, "err.redirect")));
         const next = new URL(response.headers.location, url).href;
-        fetchPublic(next, redirects + 1, signal).then(resolve, reject);
+        fetchPublic(next, redirects + 1, signal, lang).then(resolve, reject);
         return;
       }
       if (!response.statusCode || response.statusCode < 200 || response.statusCode >= 300) {
         response.resume();
-        reject(new Error(`配信元がHTTP ${response.statusCode ?? "エラー"}を返しました。`));
+        reject(new Error(t(lang, "err.httpStatus", { status: response.statusCode ?? "error" })));
         return;
       }
       const chunks: Buffer[] = [];
       let size = 0;
       response.on("data", (chunk: Buffer) => {
         size += chunk.length;
-        if (size > MAX_BYTES) request.destroy(new Error("配信データが大きすぎます（上限5MB）。"));
+        if (size > MAX_BYTES) request.destroy(new Error(t(lang, "err.tooLarge")));
         else chunks.push(chunk);
       });
       response.on("error", reject);
       response.on("end", () => resolve({ body: Buffer.concat(chunks), url: url.href, contentType: response.headers["content-type"] ?? "" }));
     });
-    const timeout = setTimeout(() => request.destroy(new Error("配信元への接続がタイムアウトしました。")), 20_000);
+    const timeout = setTimeout(() => request.destroy(new Error(t(lang, "err.timeout"))), 20_000);
     request.on("close", () => clearTimeout(timeout));
     request.on("error", reject);
     request.end();

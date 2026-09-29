@@ -3,6 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { agentSchema, stateSchema } from "../shared/schema";
+import { t } from "../shared/i18n";
 import type { Agent, Conversation, ReaderState } from "../shared/schema";
 import { agentError, runReader } from "../main/agents/reader";
 import type { AgentEvent } from "../main/agents/reader";
@@ -32,7 +33,7 @@ export function defaultStorePath() {
 export async function loadState(path = process.env.REEDAR_STORE ?? defaultStorePath()): Promise<ReaderState> {
   let raw: string;
   try { raw = await readFile(path, "utf8"); }
-  catch { throw new Error(`ライブラリを読み込めませんでした: ${path}`); }
+  catch { throw new Error(t("en", "err.libraryUnreadable", { path })); }
   return stateSchema.parse(JSON.parse(raw));
 }
 
@@ -80,7 +81,7 @@ function articleRows(state: ReaderState, args: string[]) {
 
 function findArticle(state: ReaderState, id: string) {
   const article = state.articles.find((item) => item.id === id || item.id.startsWith(id));
-  if (!article) throw new Error(`記事が見つかりません: ${id}`);
+  if (!article) throw new Error(t("en", "err.articleMissing"));
   return article;
 }
 
@@ -91,11 +92,12 @@ export async function cli(argv: string[], io: Io, run: typeof runReader = runRea
   try {
     if (!command || command === "help" || command === "--help" || command === "-h") { out(USAGE.trimEnd()); return 0; }
     const state = await loadState();
+    const lang = state.language;
     const json = flag(args, "json") || !!io.json;
     if (command === "feeds") {
       const rows = feedRows(state);
       if (json) for (const row of rows) out(JSON.stringify(row));
-      else for (const row of rows) out(`${row.unread > 0 ? "●" : "○"} ${row.title} [${row.folder ?? "フォルダなし"}] 未読${row.unread}/${row.articles}${row.error ? ` エラー: ${row.error}` : ""}\n    ${row.url}`);
+      else for (const row of rows) out(`${row.unread > 0 ? "●" : "○"} ${row.title} [${row.folder ?? t(lang, "cli.noFolder")}] ${t(lang, "cli.unreadCount", { unread: row.unread, total: row.articles })}${row.error ? `  ${t(lang, "cli.error", { detail: row.error })}` : ""}\n    ${row.url}`);
       return 0;
     }
     if (command === "articles") {
@@ -110,13 +112,13 @@ export async function cli(argv: string[], io: Io, run: typeof runReader = runRea
       const article = findArticle(state, id);
       const feed = state.feeds.find((feed) => feed.id === article.feedId);
       if (json) out(JSON.stringify(article, null, 2));
-      else out(`${article.title}\n${feed?.title ?? ""} — ${article.publishedAt.slice(0, 10)} — ${article.url}\n${article.starred ? "★ " : ""}${article.read ? "既読" : "未読"}\n\n${article.text}`);
+      else out(`${article.title}\n${feed?.title ?? ""} — ${article.publishedAt.slice(0, 10)} — ${article.url}\n${article.starred ? "★ " : ""}${article.read ? t(lang, "cli.read") : t(lang, "cli.unread")}\n\n${article.text}`);
       return 0;
     }
     if (command === "summarize") {
       if (!id) { err("Usage: open-reedar summarize <id> [--agent codex|claude] [--question <text>]"); return 1; }
       const agent = (option(args, "agent") ?? "codex") as Agent;
-      if (!agentSchema.options.includes(agent)) { err(`不明なエージェントです: ${agent}`); return 1; }
+      if (!agentSchema.options.includes(agent)) { err(t(lang, "err.unknownAgent", { agent })); return 1; }
       const article = findArticle(state, id);
       const conversation: Conversation = {
         id: "cli", articleId: article.id, agent,
@@ -127,16 +129,16 @@ export async function cli(argv: string[], io: Io, run: typeof runReader = runRea
       const emit = (event: AgentEvent) => { if (event.type === "delta") text = event.text; };
       const controller = new AbortController();
       process.on("SIGINT", () => controller.abort());
-      await run(agent, conversation, option(args, "question") ?? "この記事の要点と結論を日本語で簡潔に要約してください。重要な事実と背景を含め、本文にない推測は避けてください。", tmpdir(), controller.signal, emit);
-      if (!text) throw new Error("エージェントから回答を取得できませんでした。");
+      await run(agent, conversation, option(args, "question") ?? t(lang, "prompt.summarize"), tmpdir(), controller.signal, emit, lang);
+      if (!text) throw new Error(t(lang, "err.noAnswer"));
       out(json ? JSON.stringify({ articleId: article.id, agent, answer: text }) : text);
       return 0;
     }
-    err(`不明なコマンドです: ${command}\n\n${USAGE.trimEnd()}`);
+    err(`${t(lang, "err.unknownCommand", { command })}\n\n${USAGE.trimEnd()}`);
     return 1;
   } catch (error) {
-    const translated = agentError(error);
-    err(`エラー: ${translated.startsWith("エージェントの処理に失敗") && error instanceof Error ? error.message : translated}`);
+    const translated = agentError(error, "en");
+    err(`Error: ${translated === t("en", "err.agentFailed") && error instanceof Error ? error.message : translated}`);
     return 1;
   }
 }
