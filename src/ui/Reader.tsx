@@ -17,8 +17,9 @@ export function Reader({ agent, conversation, act, article, feed, aiOpen, toggle
   const [atEnd, setAtEnd] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const overscroll = useRef(0);
+  const shownAt = useRef(0);
   useEffect(() => {
-    setWebView(!!article?.readerHtml); setFetching(false); setFetchError(null); overscroll.current = 0;
+    setWebView(!!article?.readerHtml); setFetching(false); setFetchError(null); overscroll.current = 0; shownAt.current = Date.now();
     const el = scrollRef.current;
     setAtEnd(el ? el.scrollTop + el.clientHeight >= el.scrollHeight - 24 : false);
   }, [article?.id, webView]);
@@ -29,7 +30,7 @@ export function Reader({ agent, conversation, act, article, feed, aiOpen, toggle
   function onWheel(event: WheelEvent<HTMLDivElement>) {
     const el = scrollRef.current;
     const bottom = el ? el.scrollTop + el.clientHeight >= el.scrollHeight - 4 : false;
-    if (event.deltaY > 0 && bottom && hasNext) {
+    if (event.deltaY > 0 && bottom && hasNext && Date.now() - shownAt.current > 500) {
       overscroll.current += event.deltaY;
       if (overscroll.current > 240) { overscroll.current = 0; next(); }
     } else overscroll.current = 0;
