@@ -104,7 +104,7 @@ export class Engine {
       case "folder.remove": this.store.removeFolder(action.id); break;
       case "article.read": this.store.article(action.id).read = action.read; break;
       case "article.star": this.store.article(action.id).starred = action.starred; break;
-      case "app.setLanguage": this.store.state.language = action.language; break;
+      case "app.setLanguage": this.store.state.language = action.language; void this.refreshConnections(); break;
       case "opml.import": return this.importOpml(action.xml, action.urls, action.folders);
       case "opml.preview": return this.previewOpml(action.xml);
       case "opml.previewClear": this.opmlPreview = null; this.changed(); return;
