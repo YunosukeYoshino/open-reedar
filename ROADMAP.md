@@ -51,7 +51,7 @@ Prioritize moving an existing feed library into Reedar and managing it without e
 - [x] **Remove and restore subscriptions.** Removed feeds stop refreshing and disappear from reading views; cached articles, stars, and conversations are retained for restoration.
 - [x] **Remove folders.** Deleting a folder unassigns its feeds; subscriptions stay readable.
 - [x] **Import and export OPML.** Preserve folder membership, skip duplicates, report individual failures, and support cancellation. Nested folder paths are flattened; the import limit is 256 KB / 200 feeds.
-- [ ] **Refresh feeds automatically while the app is open.** Add a configurable interval, retry/backoff, and conditional requests so repeated refreshes do not download unchanged feeds unnecessarily.
+- [x] **Refresh feeds automatically while the app is open.** A sidebar interval picker (off / 15 min–6 hr, default 30) drives scheduled refreshes; ETag / Last-Modified validators skip unchanged feeds, and per-feed failures back off quadratically (5 min up to 2 hr). Manual refresh ignores backoff.
 - [ ] **Mark a feed or folder as read.** Add scoped bulk actions with a clear target and undo.
 - [ ] **Discover feeds from website URLs.** Offer RSS / Atom candidates when a user enters a normal site URL; retain the existing public-network checks.
 - [ ] **Manage and back up local data.** Export and restore a library, remove individual conversations, and define cache retention without discarding starred articles or their conversation sources.

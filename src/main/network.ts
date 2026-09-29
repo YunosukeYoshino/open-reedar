@@ -31,7 +31,7 @@ export function isPublicAddress(address: string) {
   catch { return false; }
 }
 
-export async function fetchPublic(value: string, redirects = 0, signal?: AbortSignal, lang: Language = "en"): Promise<{ body: Buffer; url: string; contentType: string }> {
+export async function fetchPublic(value: string, redirects = 0, signal?: AbortSignal, lang: Language = "en", requestHeaders?: Record<string, string>): Promise<{ body: Buffer; url: string; contentType: string; etag?: string; lastModified?: string; notModified?: boolean }> {
   signal?.throwIfAborted();
   const url = publicUrl(value, lang);
   const addresses = await lookup(url.hostname.replace(/^\[|\]$/g, ""), { all: true });
@@ -50,13 +50,18 @@ export async function fetchPublic(value: string, redirects = 0, signal?: AbortSi
         else callback(null, address.address, address.family);
       },
       agent: false, signal,
-      headers: { "User-Agent": "Reedar/0.1 (+local RSS reader)", Accept: "text/html, application/xhtml+xml, application/rss+xml, application/atom+xml, application/xml, text/xml, image/*;q=0.8, */*;q=0.1", "Accept-Encoding": "identity" },
+      headers: { "User-Agent": "Reedar/0.1 (+local RSS reader)", Accept: "text/html, application/xhtml+xml, application/rss+xml, application/atom+xml, application/xml, text/xml, image/*;q=0.8, */*;q=0.1", "Accept-Encoding": "identity", ...requestHeaders },
     }, (response) => {
       if (response.statusCode && [301, 302, 303, 307, 308].includes(response.statusCode)) {
         response.resume();
         if (redirects >= 4 || !response.headers.location) return reject(new Error(t(lang, "err.redirect")));
         const next = new URL(response.headers.location, url).href;
-        fetchPublic(next, redirects + 1, signal, lang).then(resolve, reject);
+        fetchPublic(next, redirects + 1, signal, lang, requestHeaders).then(resolve, reject);
+        return;
+      }
+      if (response.statusCode === 304) {
+        response.resume();
+        resolve({ body: Buffer.alloc(0), url: url.href, contentType: "", notModified: true, etag: response.headers.etag, lastModified: response.headers["last-modified"] });
         return;
       }
       if (!response.statusCode || response.statusCode < 200 || response.statusCode >= 300) {
@@ -72,7 +77,7 @@ export async function fetchPublic(value: string, redirects = 0, signal?: AbortSi
         else chunks.push(chunk);
       });
       response.on("error", reject);
-      response.on("end", () => resolve({ body: Buffer.concat(chunks), url: url.href, contentType: response.headers["content-type"] ?? "" }));
+      response.on("end", () => resolve({ body: Buffer.concat(chunks), url: url.href, contentType: response.headers["content-type"] ?? "", etag: response.headers.etag, lastModified: response.headers["last-modified"] }));
     });
     const timeout = setTimeout(() => request.destroy(new Error(t(lang, "err.timeout"))), 20_000);
     request.on("close", () => clearTimeout(timeout));

@@ -22,7 +22,7 @@ export class Store {
       if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
         throw new Error(t("en", "err.storeUnreadable"), { cause: error });
       }
-      state = { version: 1, folders: [], feeds: [], articles: [], conversations: [], language: "en" };
+      state = { version: 1, folders: [], feeds: [], articles: [], conversations: [], language: "en", refreshMinutes: 30 };
     }
     for (const conversation of state.conversations) {
       for (const message of conversation.messages) {

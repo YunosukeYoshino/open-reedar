@@ -14,6 +14,10 @@ export const feedSchema = z.object({
   updatedAt: z.string().nullable(),
   error: z.string().nullable(),
   removedAt: z.string().optional(),
+  etag: z.string().optional(),
+  lastModified: z.string().optional(),
+  failures: z.number().int().nonnegative().optional(),
+  backoffUntil: z.string().optional(),
 });
 export type Feed = z.infer<typeof feedSchema>;
 
@@ -82,6 +86,7 @@ export const stateSchema = z.object({
   articles: z.array(articleSchema),
   conversations: z.array(conversationSchema),
   language: languageSchema.default("en"),
+  refreshMinutes: z.number().int().min(0).max(1440).default(30),
 });
 export type ReaderState = z.infer<typeof stateSchema>;
 
@@ -158,7 +163,7 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("opml.preview"), xml: z.string().min(1).max(262_144) }),
   z.object({ type: z.literal("opml.previewClear") }),
   z.object({ type: z.literal("opml.stop") }),
-  z.object({ type: z.literal("refresh") }),
+  z.object({ type: z.literal("refresh"), automatic: z.boolean().optional() }),
   z.object({ type: z.literal("connections.refresh") }),
   z.object({ type: z.literal("organize.propose"), agent: agentSchema, scope: z.enum(["library", "opml"]) }),
   z.object({
@@ -173,5 +178,6 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("chat.summarize"), articleId: z.string(), agent: agentSchema }),
   z.object({ type: z.literal("chat.stop"), conversationId: z.string() }),
   z.object({ type: z.literal("app.setLanguage"), language: languageSchema }),
+  z.object({ type: z.literal("app.setRefreshInterval"), minutes: z.number().int().min(0).max(1440) }),
 ]);
 export type Action = z.infer<typeof actionSchema>;

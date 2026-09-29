@@ -365,4 +365,46 @@ describe("reading workflow", () => {
     expect(engine.refreshing).toBe(false);
     await engine.close();
   });
+
+  test("automatic refresh reuses validators, clears failures on 304, and backs off errors", async () => {
+    const calls: ({ etag?: string; lastModified?: string } | undefined)[] = [];
+    let mode: "ok" | "fail" | "stale" = "ok";
+    const path = join(directory, "auto-refresh", "state.json");
+    const store = await Store.open(path);
+    const parsed = await parseFeed(xml, "https://example.com/rss", null);
+    parsed.feed.etag = "v1";
+    store.mergeFeed(parsed.feed, parsed.articles);
+    const connect: typeof connection = async (agent) => ({ agent, installed: true, status: "ready", detail: "fixture" });
+    const engine = new Engine(store, join(directory, "auto-refresh", "runner"), {
+      connect,
+      fetchFeed: async (url, folderId, _signal, _lang, cache) => {
+        calls.push(cache);
+        if (mode === "fail") throw new Error("Network failed");
+        const again = await parseFeed(xml, url, folderId);
+        return mode === "stale" ? { feed: again.feed, articles: again.articles, notModified: true } : { ...again, etag: "v2" };
+      },
+    });
+    await engine.initialize();
+    await engine.dispatch({ type: "refresh" });
+    expect(calls.at(-1)).toEqual({ etag: "v1" });
+    expect(store.state.feeds[0]?.etag).toBe("v2");
+    store.state.feeds[0]!.error = "earlier failure";
+    mode = "stale";
+    await engine.dispatch({ type: "refresh", automatic: true });
+    expect(store.state.feeds[0]?.error).toBeNull();
+    expect(store.state.feeds[0]?.etag).toBe("v2");
+    mode = "fail";
+    await engine.dispatch({ type: "refresh" });
+    const failed = store.state.feeds[0];
+    expect(failed?.failures).toBe(1);
+    expect(failed?.backoffUntil).toBeString();
+    const fetched = calls.length;
+    await engine.dispatch({ type: "refresh", automatic: true });
+    expect(calls).toHaveLength(fetched);
+    await engine.dispatch({ type: "refresh" });
+    expect(calls).toHaveLength(fetched + 1);
+    await engine.dispatch({ type: "app.setRefreshInterval", minutes: 45 });
+    expect((await Store.open(path)).state.refreshMinutes).toBe(45);
+    await engine.close();
+  });
 });
