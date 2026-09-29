@@ -19,9 +19,11 @@ export function agentEnvironment() {
   return env;
 }
 
+export const cliNames: Record<Agent, string> = { codex: "Codex", claude: "Claude Code", antigravity: "Antigravity", apple: "fm" };
+
 export async function executable(agent: Agent) {
-  const command = agent === "antigravity" ? "agy" : agent;
-  const override = process.env[{ codex: "REEDAR_CODEX_BIN", claude: "REEDAR_CLAUDE_BIN", antigravity: "REEDAR_ANTIGRAVITY_BIN" }[agent]];
+  const command = agent === "antigravity" ? "agy" : agent === "apple" ? "fm" : agent;
+  const override = process.env[{ codex: "REEDAR_CODEX_BIN", claude: "REEDAR_CLAUDE_BIN", antigravity: "REEDAR_ANTIGRAVITY_BIN", apple: "REEDAR_APPLE_BIN" }[agent]];
   const paths = [
     ...(override ? [override] : []),
     ...(agent === "codex" ? ["/Applications/ChatGPT.app/Contents/Resources/codex", "/Applications/Codex.app/Contents/Resources/codex"] : []),
@@ -32,7 +34,7 @@ export async function executable(agent: Agent) {
     try { await access(path, constants.X_OK); return path; }
     catch { /* Try the next installed executable. */ }
   }
-  throw new Error(t("en", "err.cliMissing", { name: agent === "codex" ? "Codex" : agent === "claude" ? "Claude Code" : "Antigravity" }));
+  throw new Error(t("en", "err.cliMissing", { name: cliNames[agent] }));
 }
 
 export async function codexArguments(configPath = join(process.env.CODEX_HOME || join(homedir(), ".codex"), "config.toml"), lang: Language = "en") {

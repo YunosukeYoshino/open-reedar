@@ -150,6 +150,7 @@ const en = {
   "ai.sendFailed": "Could not send.",
   "ai.question": "Question for AI",
   "ai.suggestTranslate": "Translate this article",
+  "ai.appleLocal": "On-device",
   "ai.copyConversation": "Copy conversation as Markdown",
   "ai.copied": "Copied",
 
@@ -399,6 +400,8 @@ const en = {
   "err.agentTimeoutShort": "The agent timed out. Please try again.",
   "err.agentFailed": "The agent request failed. Check the connection and retry.",
   "err.readyDetail": "Connectable with your existing plan",
+  "err.appleDetail": "Built in — on-device Apple Intelligence via the fm command (macOS 27+)",
+  "err.appleFailed": "Apple Intelligence could not answer. Check that Apple Intelligence is enabled in System Settings.",
   "err.claudeLoginDetail": "Run claude auth login in a terminal",
   "err.codexLoginDetail": "Run codex login in a terminal and sign in with ChatGPT",
   "err.connectionCheck": "Could not verify the CLI connection. Check the CLI version and settings.",
@@ -600,6 +603,7 @@ const ja: Record<MessageKey, string> = {
   "ai.sendFailed": "送信できませんでした。",
   "ai.question": "AIへの質問",
   "ai.suggestTranslate": "この記事を翻訳して",
+  "ai.appleLocal": "オンデバイス",
   "ai.copyConversation": "会話をMarkdownでコピー",
   "ai.copied": "コピーしました",
 
@@ -839,6 +843,8 @@ const ja: Record<MessageKey, string> = {
   "err.agentTimeoutShort": "エージェントの応答がタイムアウトしました。もう一度お試しください。",
   "err.agentFailed": "エージェントの処理に失敗しました。接続状態を確認して再送してください。",
   "err.readyDetail": "既存の契約で接続できます",
+  "err.appleDetail": "内蔵 — fmコマンド経由のオンデバイスApple Intelligence（macOS 27以降）",
+  "err.appleFailed": "Apple Intelligenceが応答できませんでした。システム設定でApple Intelligenceが有効か確認してください。",
   "err.claudeLoginDetail": "ターミナルで claude auth login を実行してください",
   "err.codexLoginDetail": "ターミナルで codex login を実行し、ChatGPTでログインしてください",
   "err.connectionCheck": "CLIとの接続を確認できません。CLIのバージョンと設定を確認してください。",

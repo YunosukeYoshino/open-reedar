@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Agent, Connection, Conversation, Language } from "../../shared/schema";
 import { codexModel } from "../../shared/schema";
 import { t } from "../../shared/i18n";
-import { claudeArguments, codexArguments, executable, launch, RpcClient, terminate } from "./process";
+import { claudeArguments, cliNames, codexArguments, executable, launch, RpcClient, terminate } from "./process";
 
 export type AgentEvent = { type: "delta"; text: string } | { type: "waiting"; reason: string };
 export class LocalizedError extends Error {}
@@ -56,8 +56,10 @@ async function claudeAuth(path: string, cwd: string) {
 export async function connection(agent: Agent, cwd: string, lang: Language = "en"): Promise<Connection> {
   let path: string;
   try { path = await executable(agent); }
-  catch { return { agent, installed: false, status: "unavailable", detail: t(lang, "err.cliMissing", { name: agent === "codex" ? "Codex" : agent === "claude" ? "Claude Code" : "Antigravity" }) }; }
+  catch { return { agent, installed: false, status: "unavailable", detail: t(lang, "err.cliMissing", { name: cliNames[agent] }) }; }
   if (agent === "antigravity") return { agent, installed: true, status: "unsupported", detail: t(lang, "err.antigravity") };
+  // Apple Intelligence needs no sign-in: an installed fm means macOS 27+ with the on-device model.
+  if (agent === "apple") return { agent, installed: true, status: "ready", detail: t(lang, "err.appleDetail") };
   try {
     let ready = false;
     if (agent === "claude") ready = await claudeAuth(path, cwd);
@@ -86,11 +88,20 @@ export function agentError(error: unknown, lang: Language = "en") {
   return t(lang, "err.agentFailed");
 }
 
+// The on-device model context is ~8k tokens, so fm prompts are capped at 30k chars with the article text truncated first.
+const fmPromptLimit = 30_000;
+
 export async function runReader(agent: Agent, conversation: Conversation, question: string, cwd: string, signal: AbortSignal, emit: (event: AgentEvent) => void, lang: Language = "en") {
   if (agent === "antigravity") throw new LocalizedError(t(lang, "err.antigravity"));
   const prompt = readerPrompt(conversation, question, lang);
   if (signal.aborted) throw new LocalizedError(t(lang, "err.aborted"));
   const path = await executable(agent);
+  if (agent === "apple") {
+    const fmPrompt = prompt.length <= fmPromptLimit ? prompt
+      : readerPrompt({ ...conversation, source: { ...conversation.source, text: conversation.source.text.slice(0, 24_000) } }, question, lang);
+    if (fmPrompt.length > fmPromptLimit) throw new LocalizedError(t(lang, "err.tooLong"));
+    return runFm(path, fmPrompt, cwd, signal, emit, lang);
+  }
   if (agent === "claude") return runClaude(path, prompt, cwd, signal, emit, "reader", lang);
   return runCodex(path, prompt, cwd, signal, emit, undefined, "reader", lang);
 }
@@ -100,8 +111,30 @@ export async function runOrganizer(agent: Agent, prompt: string, cwd: string, si
   if (prompt.length > 180_000) throw new LocalizedError(t(lang, "err.organizeTooLarge"));
   if (signal.aborted) throw new LocalizedError(t(lang, "err.aborted"));
   const path = await executable(agent);
+  if (agent === "apple") {
+    if (prompt.length > fmPromptLimit) throw new LocalizedError(t(lang, "err.organizeTooLarge"));
+    return runFm(path, prompt, cwd, signal, emit, lang);
+  }
   if (agent === "claude") return runClaude(path, prompt, cwd, signal, emit, "organizer", lang);
   return runCodex(path, prompt, cwd, signal, emit, undefined, "organizer", lang);
+}
+
+async function runFm(path: string, prompt: string, cwd: string, signal: AbortSignal, emit: (event: AgentEvent) => void, lang: Language = "en") {
+  await new Promise<void>((resolve, reject) => {
+    const child = launch(path, ["respond", prompt], cwd);
+    let text = "";
+    const abort = () => terminate(child);
+    signal.addEventListener("abort", abort, { once: true });
+    const timer = setTimeout(() => terminate(child), 120_000);
+    child.stdout.on("data", (chunk: Buffer) => { text += chunk.toString(); emit({ type: "delta", text }); });
+    child.once("error", reject);
+    child.once("close", (code) => {
+      clearTimeout(timer); signal.removeEventListener("abort", abort);
+      if (signal.aborted) reject(new LocalizedError(t(lang, "err.aborted")));
+      else if (code === 0 && text.trim()) resolve();
+      else reject(new LocalizedError(t(lang, "err.appleFailed")));
+    });
+  });
 }
 
 async function runClaude(path: string, prompt: string, cwd: string, signal: AbortSignal, emit: (event: AgentEvent) => void, kind: SessionKind = "reader", lang: Language = "en") {
