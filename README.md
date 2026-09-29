@@ -43,7 +43,7 @@ Download the DMG from the [v0.2.0 release](https://github.com/YunosukeYoshino/re
 
 ### Run the desktop app
 
-For development, install Bun (the current baseline is **1.3.12**). The test suite also requires `trash` on `PATH` for temporary-file cleanup. From a local checkout:
+For development, install Bun (the current baseline is **1.4.2**). The test suite also requires `trash` on `PATH` for temporary-file cleanup. From a local checkout:
 
 ```sh
 bun install --frozen-lockfile
