@@ -8,6 +8,7 @@
   "main": "dist/electron.cjs",
   "scripts": {
     "build": "bun scripts/build.ts",
+    "benchmark": "bun scripts/benchmark.ts",
     "dev": "bun run build && bun src/main/dev.ts",
     "start": "bun run build && electron .",
     "typecheck": "tsc --noEmit",
