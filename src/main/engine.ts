@@ -467,15 +467,20 @@ export class Engine {
     const perArticle = Math.min(15_000, Math.floor((agent === "apple" ? fmPccPromptLimit - 10_000 : 150_000) / Math.max(picked.length, 1)));
     // perArticle budgets the JSON-serialized block, so escaping overhead can't push the final prompt past the cap and silently drop tail articles.
     const blockFor = (article: (typeof picked)[number]) => {
-      // The title is capped so header + 500-char body floor always fits the budget; a giant header can neither drain the body nor overflow the joined prompt.
-      const title = article.title.slice(0, Math.max(0, perArticle - 500 - article.url.length - 10));
-      const header = `## ${title}\n${article.url}\n\n`;
       const text = article.readerText ?? article.text;
-      let slice = text.slice(0, perArticle);
-      while (slice.length > 500 && JSON.stringify(header + slice).length > perArticle) {
-        slice = slice.slice(0, Math.max(500, Math.floor(slice.length * perArticle / JSON.stringify(header + slice).length) - 1));
+      // The body floor is the smaller of 500 chars and the actual text, and the title gets whatever the floor leaves; short bodies hand their room to the title.
+      const floor = Math.min(500, text.length);
+      const title = article.title.slice(0, Math.max(0, perArticle - floor - article.url.length - 10));
+      const header = `## ${title}\n${article.url}\n\n`;
+      let block = header + text.slice(0, perArticle);
+      while (JSON.stringify(block).length > perArticle && block.length > floor + header.length) {
+        block = header + block.slice(header.length, Math.max(floor + header.length, Math.floor(block.length * perArticle / JSON.stringify(block).length) - 1));
       }
-      return header + slice;
+      // Last resort for pathological URLs: shrink the serialized block itself, never below `floor` chars.
+      while (JSON.stringify(block).length > perArticle && block.length > floor) {
+        block = block.slice(0, Math.max(floor, Math.floor(block.length * perArticle / JSON.stringify(block).length) - 1));
+      }
+      return block;
     };
     const source = picked.map(blockFor).join("\n\n");
     if (picked.filter((article) => (article.readerText ?? article.text).trim()).length < 2) {
