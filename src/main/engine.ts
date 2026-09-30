@@ -467,9 +467,10 @@ export class Engine {
     const perArticle = Math.min(15_000, Math.floor((agent === "apple" ? fmPccPromptLimit - 10_000 : 150_000) / Math.max(picked.length, 1)));
     // perArticle budgets the JSON-serialized block, so escaping overhead can't push the final prompt past the cap and silently drop tail articles.
     const blockFor = (article: (typeof picked)[number]) => {
-      const header = `## ${article.title}\n${article.url}\n\n`;
+      // The title is capped so header + 500-char body floor always fits the budget; a giant header can neither drain the body nor overflow the joined prompt.
+      const title = article.title.slice(0, Math.max(0, perArticle - 500 - article.url.length - 10));
+      const header = `## ${title}\n${article.url}\n\n`;
       const text = article.readerText ?? article.text;
-      // Keep at least 500 chars of body even when an oversized header alone exceeds the budget; an empty body would summarize nothing.
       let slice = text.slice(0, perArticle);
       while (slice.length > 500 && JSON.stringify(header + slice).length > perArticle) {
         slice = slice.slice(0, Math.max(500, Math.floor(slice.length * perArticle / JSON.stringify(header + slice).length) - 1));

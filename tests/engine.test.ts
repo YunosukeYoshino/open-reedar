@@ -492,15 +492,15 @@ describe("reading workflow", () => {
     for (let i = 0; i < 20; i++) expect(source).toContain(`## A${i}\n`);
     await engine.close();
   });
-  test("digest keeps a body floor when a title alone exceeds the per-article budget", async () => {
+  test("digest keeps a body floor and stays under budget when titles alone exceed it", async () => {
     let source = "";
     const { engine, store, article } = await setup("digest-floor", async (_agent, conversation) => { source = conversation.source.text; });
-    const huge = { ...article, id: "huge", title: "T".repeat(16000), text: "body ".repeat(400) };
-    const short = { ...article, id: "short", title: "Short", text: "ok" };
-    store.state.articles.push(huge, short);
-    await engine.dispatch({ type: "digest.run", articleIds: ["huge", "short"], agent: "apple" });
+    const articles = Array.from({ length: 20 }, (_, i) => ({ ...article, id: `g${i}`, title: `T${i}` + "T".repeat(4600), text: `body${i} `.repeat(400) }));
+    store.state.articles.push(...articles);
+    await engine.dispatch({ type: "digest.run", articleIds: articles.map((item) => item.id), agent: "apple" });
     await engine.settle();
-    expect(source).toContain("body ".repeat(100));
+    expect(source.length).toBeLessThan(92_000);
+    expect(source).toContain(`body${19} `);
     await engine.close();
   });
   test("the apple model setting persists and an agent notice lands on the assistant message", async () => {
