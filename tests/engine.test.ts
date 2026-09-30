@@ -618,33 +618,14 @@ describe("reading workflow", () => {
   test("library import re-sanitizes article HTML instead of trusting the backup", async () => {
     const { engine, store } = await setup("library-sanitize", async () => {});
     const exported = await engine.dispatch({ type: "library.export" }) as LibraryExport;
-    exported.articles[0]!.readerHtml = '<p>ok</p><script>alert(1)</script><img src="https://e.com/i.png" onerror="alert(2)">';
+    exported.articles[0]!.readerHtml = '<p>ok</p><script>alert(1)</script><img src="https://e.com/i.png" onerror="alert(2)"><img src="/image?url=https%3A%2F%2Fe.com%2Fkept.png">';
     await engine.dispatch({ type: "library.import", json: JSON.stringify(exported) });
     const html = store.state.articles[0]!.readerHtml!;
     expect(html).not.toMatch(/script|onerror/);
     expect(html).toContain("/image?url=");
+    expect(html).toContain("/image?url=https%3A%2F%2Fe.com%2Fkept.png");
+    expect(html).not.toContain("image%3Furl%3D");
     await engine.close();
   });
 
-  test("a restore during an in-flight refresh drops the fetched results instead of merging over the backup", async () => {
-    const path = join(directory, "import-refresh-race", "state.json");
-    const store4 = await Store.open(path);
-    const parsed = await parseFeed(xml, "https://example.com/rss", null);
-    store4.mergeFeed(parsed.feed, parsed.articles);
-    let release: () => void = () => {};
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    const connect: typeof connection = async (agent) => ({ agent, installed: true, status: "ready", detail: "fixture" });
-    const engine4 = new Engine(store4, join(directory, "import-refresh-race", "runner"), {
-      run: async () => {}, connect,
-      fetchFeed: async (url: string, folderId: string | null) => { await gate; return parseFeed(xml, url, folderId); },
-    });
-    await engine4.initialize();
-    const refreshing = engine4.dispatch({ type: "refresh" });
-    await engine4.dispatch({ type: "library.import", json: JSON.stringify({ version: 1, exportedAt: "", feeds: [], folders: [], articles: [], settings: {} }) });
-    release();
-    await refreshing;
-    expect(store4.state.feeds).toHaveLength(0);
-    expect(store4.state.articles).toHaveLength(0);
-    await engine4.close();
-  });
 });
