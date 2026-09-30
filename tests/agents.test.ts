@@ -171,6 +171,28 @@ describe("reading context", () => {
       else process.env.REEDAR_APPLE_BIN = previous;
     }
   });
+  test("runReader keeps article text when JSON escapes shrink the computed budget below zero", async () => {
+    const calls = join(directory, "fm-escape.log");
+    const fm = join(directory, "fm-escape");
+    await writeFile(fm, `#!/bin/sh\necho call >> "${calls}"\nprintf '%s' "$2" > "${calls}.last"\nprintf 'answer'\n`);
+    await Bun.spawn(["chmod", "+x", fm]).exited;
+    const previous = process.env.REEDAR_APPLE_BIN;
+    process.env.REEDAR_APPLE_BIN = fm;
+    try {
+      // 31k quote chars serialize to ~62k: the old raw-vs-escaped length math underflowed the
+      // condense budget below zero and sent an empty article.
+      const heavy = { ...conversation, agent: "apple" as const, source: { ...conversation.source, text: '"'.repeat(31_000) } };
+      const output: string[] = [];
+      await runReader("apple", heavy, "要約して", directory, new AbortController().signal, (event) => { if (event.type === "delta") output.push(event.text); });
+      const sent = await Bun.file(`${calls}.last`).text();
+      const json = JSON.parse(sent.slice(sent.indexOf('{"source"')));
+      expect(json.source.text.length).toBeGreaterThan(0);
+      expect(output.at(-1)).toBe("answer");
+    } finally {
+      if (previous === undefined) delete process.env.REEDAR_APPLE_BIN;
+      else process.env.REEDAR_APPLE_BIN = previous;
+    }
+  });
   test("article instructions stay quoted and cancelled output does not become successful conversation history", () => {
     const prompt: unknown = JSON.parse(readerPrompt(conversation, "根拠を説明して"));
     expect(prompt).toMatchObject({ question: "根拠を説明して", source: { text: conversation.source.text }, history: [{ role: "user", text: "要約して" }, { role: "assistant", text: "要約" }] });

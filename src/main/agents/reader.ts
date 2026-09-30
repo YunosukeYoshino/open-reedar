@@ -129,8 +129,15 @@ export async function runReader(agent: Agent, conversation: Conversation, questi
   const input = readerInput(conversation, question);
   let prompt = header + JSON.stringify(input);
   if (prompt.length > cap) {
-    const text = await condense(conversation.source.text, cap - (prompt.length - conversation.source.text.length), cap, chunkRunner(agent, path, cwd, lang), signal, lang);
+    // The budget is in raw-text chars while prompt.length is post-escaping, so measure the
+    // non-text overhead by serializing with an empty source and re-shrink until it fits.
+    const empty = header + JSON.stringify({ ...input, source: { ...input.source, text: "" } });
+    let text = await condense(conversation.source.text, cap - empty.length, cap, chunkRunner(agent, path, cwd, lang), signal, lang);
     prompt = header + JSON.stringify({ ...input, source: { ...input.source, text } });
+    while (prompt.length > cap && text.length > 0) {
+      text = text.slice(0, text.length - (prompt.length - cap));
+      prompt = header + JSON.stringify({ ...input, source: { ...input.source, text } });
+    }
     if (prompt.length > cap) throw new LocalizedError(t(lang, "err.tooLong"));
   }
   if (agent === "apple") return runFm(path, prompt, cwd, signal, emit, lang);
