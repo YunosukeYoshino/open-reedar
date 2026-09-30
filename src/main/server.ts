@@ -80,10 +80,10 @@ export async function startServer(options: Options) {
     }
     if (request.method === "POST" && url.pathname === "/api/action") {
       if (request.headers.origin !== origin || !request.headers["content-type"]?.startsWith("application/json")) return json(response, 403, { error: t(store.state.language, "err.externalAction") });
-      const result = actionSchema.safeParse(await requestBody(request, 1024 * 1024));
+      const result = actionSchema.safeParse(await requestBody(request, 33 * 1024 * 1024));
       if (!result.success) return json(response, 400, { error: t(store.state.language, "err.checkInput") });
-      await engine.dispatch(result.data);
-      return json(response, 200, { ok: true });
+      const outcome = await engine.dispatch(result.data);
+      return json(response, 200, outcome === undefined ? { ok: true } : { ok: true, result: outcome });
     }
     if (request.method === "GET" && url.pathname === "/api/events") {
       response.writeHead(200, { "Content-Type": "text/event-stream", Connection: "keep-alive", "X-Accel-Buffering": "no" });

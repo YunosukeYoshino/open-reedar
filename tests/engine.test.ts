@@ -7,6 +7,7 @@ import type { connection, runOrganizer, runReader } from "../src/main/agents/rea
 import { Engine } from "../src/main/engine";
 import { parseFeed } from "../src/main/feeds";
 import { Store } from "../src/main/store";
+import type { Article, LibraryExport } from "../src/shared/schema";
 
 const directory = await mkdtemp(join(tmpdir(), "reedar-engine-test-"));
 afterAll(async () => { await Bun.spawn(["trash", directory]).exited; });
@@ -466,5 +467,119 @@ describe("reading workflow", () => {
     expect(engine.snapshot.digest).toMatchObject({ status: "completed", text: "Digest" });
     expect(question.length).toBeGreaterThan(0);
     await engine.close();
+  });
+
+  test("library export and import round-trip the full library", async () => {
+    const { engine, store, article } = await setup("library-export", async (_agent, _conversation, _question, _cwd, _signal, emit) => { emit({ type: "delta", text: "Hi" }); });
+    article.starred = true;
+    article.note = "Keep this";
+    article.readerText = "Reader text";
+    article.highlights = ["Marked passage"];
+    store.saveFolder(null, "Tech");
+    store.state.feeds[0]!.folderId = store.state.folders[0]!.id;
+    await engine.dispatch({ type: "chat.send", articleId: article.id, agent: "codex", text: "Hi" });
+    await engine.settle();
+    await engine.dispatch({ type: "app.setLanguage", language: "ja" });
+    await engine.dispatch({ type: "app.setRefreshInterval", minutes: 60 });
+    await engine.dispatch({ type: "app.setFontSize", size: "l" });
+    await engine.dispatch({ type: "app.setArticlesRetention", days: 90 });
+    const exported = await engine.dispatch({ type: "library.export" }) as LibraryExport;
+    expect(exported.version).toBe(1);
+    expect(Date.parse(exported.exportedAt)).not.toBeNaN();
+    const backup = exported;
+    expect(backup.articles[0]).toMatchObject({ id: article.id, starred: true, note: "Keep this", readerText: "Reader text", highlights: ["Marked passage"] });
+    expect(backup.settings).toMatchObject({ language: "ja", refreshInterval: 60, fontSize: "l", articlesRetentionDays: 90 });
+    expect(backup).not.toHaveProperty("conversations");
+
+    const path2 = join(directory, "library-import", "state.json");
+    const store2 = await Store.open(path2);
+    store2.state.conversations.push(
+      { id: "kept", articleId: article.id, agent: "codex", source: { title: "T", url: "https://example.com/a", text: "", capturedAt: new Date().toISOString() }, messages: [] },
+      { id: "dropped", articleId: "missing", agent: "codex", source: { title: "T", url: "https://example.com/a", text: "", capturedAt: new Date().toISOString() }, messages: [] },
+    );
+    const connect: typeof connection = async (agent) => ({ agent, installed: true, status: "ready", detail: "fixture" });
+    const engine2 = new Engine(store2, join(directory, "library-import", "runner"), { run: async () => {}, connect, fetchFeed: async () => { throw new Error("unused"); } });
+    await engine2.initialize();
+    await engine2.dispatch({ type: "library.import", json: JSON.stringify(exported) });
+    expect(store2.state).toMatchObject({ language: "ja", refreshMinutes: 60, fontSize: "l", articlesRetentionDays: 90 });
+    expect(store2.state.articles[0]).toMatchObject({ id: article.id, starred: true, note: "Keep this" });
+    expect(store2.state.feeds[0]?.folderId).toBe(store2.state.folders[0]?.id);
+    expect(store2.state.conversations.map((item) => item.id)).toEqual(["kept"]);
+    expect((await Store.open(path2)).state.articles).toHaveLength(1);
+    const reExported = await engine2.dispatch({ type: "library.export" }) as LibraryExport;
+    const strip = (doc: LibraryExport) => ({ ...doc, exportedAt: "" });
+    expect(strip(reExported)).toEqual(strip(backup));
+    await engine.close();
+    await engine2.close();
+  });
+
+  test("library import rejects malformed files and an empty backup wipes the library", async () => {
+    const { engine, store } = await setup("library-bad", async () => {});
+    const before = structuredClone(store.state);
+    await expect(engine.dispatch({ type: "library.import", json: "not json" })).rejects.toThrow("not a valid Reedar library backup");
+    await expect(engine.dispatch({ type: "library.import", json: JSON.stringify({ version: 2, exportedAt: "", feeds: [], folders: [], articles: [], settings: {} }) })).rejects.toThrow("not a valid Reedar library backup");
+    await expect(engine.dispatch({ type: "library.import", json: JSON.stringify({ version: 1, exportedAt: "", feeds: [], folders: [], articles: [], settings: { language: "tr" } }) })).rejects.toThrow("not a valid Reedar library backup");
+    expect(store.state).toEqual(before);
+    await engine.dispatch({ type: "library.import", json: JSON.stringify({ version: 1, exportedAt: "", feeds: [], folders: [], articles: [], settings: {} }) });
+    expect(store.state.feeds).toHaveLength(0);
+    expect(store.state.articles).toHaveLength(0);
+    await engine.close();
+  });
+
+  test("chat.delete removes the conversation but keeps its article", async () => {
+    const { engine, store, article, path } = await setup("chat-delete", async (_agent, _conversation, _question, _cwd, _signal, emit) => { emit({ type: "delta", text: "Done" }); });
+    await engine.dispatch({ type: "chat.send", articleId: article.id, agent: "codex", text: "Hi" });
+    await engine.settle();
+    const conversation = store.state.conversations[0];
+    if (!conversation) throw new Error("fixture missing");
+    expect(conversation.messages).toHaveLength(2);
+    await engine.dispatch({ type: "chat.delete", conversationId: conversation.id });
+    expect(store.state.conversations).toHaveLength(0);
+    expect(store.article(article.id).id).toBe(article.id);
+    expect((await Store.open(path)).state.conversations).toHaveLength(0);
+    await expect(engine.dispatch({ type: "chat.delete", conversationId: conversation.id })).rejects.toThrow("Conversation not found");
+    await engine.dispatch({ type: "chat.send", articleId: article.id, agent: "codex", text: "Again" });
+    await engine.settle();
+    expect(store.state.conversations).toHaveLength(1);
+    await engine.close();
+  });
+
+  test("retention drops only old unread, unstarred, unannotated articles", async () => {
+    const { engine, store, article, path } = await setup("retention", async () => {});
+    const old = new Date(Date.now() - 45 * 86_400_000).toISOString();
+    const add = async (guid: string, mark?: (item: Article) => void) => {
+      const parsed = await parseFeed(xml.replaceAll("article", guid), "https://example.com/rss", null);
+      parsed.articles[0]!.publishedAt = old;
+      mark?.(parsed.articles[0]!);
+      store.state.articles.push(...parsed.articles);
+      return parsed.articles[0]!;
+    };
+    await engine.dispatch({ type: "chat.send", articleId: article.id, agent: "codex", text: "Hi" });
+    await engine.settle();
+    const recent = await add("recent");
+    recent.publishedAt = new Date().toISOString();
+    const starred = await add("starred", (item) => { item.starred = true; });
+    const noted = await add("noted", (item) => { item.note = "pin"; });
+    const highlighted = await add("highlight", (item) => { item.highlights = ["mark"]; });
+    const read = await add("read", (item) => { item.read = true; });
+    article.publishedAt = old;
+    const keptIds = new Set([recent.id, starred.id, noted.id, highlighted.id, read.id]);
+    await engine.dispatch({ type: "app.setArticlesRetention", days: 30 });
+    expect(new Set(store.state.articles.map((item) => item.id))).toEqual(keptIds);
+    expect(store.state.conversations).toHaveLength(0);
+    expect((await Store.open(path)).state.articles).toHaveLength(keptIds.size);
+    await engine.close();
+
+    const path3 = join(directory, "retention-start", "state.json");
+    const store3 = await Store.open(path3);
+    const parsed3 = await parseFeed(xml, "https://example.com/rss", null);
+    parsed3.articles[0]!.publishedAt = old;
+    store3.mergeFeed(parsed3.feed, parsed3.articles);
+    store3.state.articlesRetentionDays = 30;
+    const connect: typeof connection = async (agent) => ({ agent, installed: true, status: "ready", detail: "fixture" });
+    const engine3 = new Engine(store3, join(directory, "retention-start", "runner"), { run: async () => {}, connect, fetchFeed: async () => { throw new Error("unused"); } });
+    await engine3.initialize();
+    expect(store3.state.articles).toHaveLength(0);
+    await engine3.close();
   });
 });
