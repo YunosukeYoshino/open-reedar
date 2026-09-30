@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { Action, Agent, CliInstall, Connection, Conversation, DigestJob, OpmlImport, OpmlPreview, OrganizeJob, Snapshot, Update } from "../shared/schema";
 import { agentSchema, codexModel } from "../shared/schema";
 import { agentError, AuthenticationRequired, connection, LocalizedError, runOrganizer, runReader } from "./agents/reader";
-import { loadArticleText } from "./article-text";
+import { loadArticleText, THIN_ARTICLE_TEXT_LENGTH } from "./article-text";
 import { discoverFeeds, loadFeed } from "./feeds";
 import { parseOpml } from "./opml";
 import { publicUrl } from "./network";
@@ -13,7 +13,7 @@ import { installCli } from "./cli-install";
 import { defaultLanguage, t } from "../shared/i18n";
 import type { MessageKey } from "../shared/i18n";
 
-type Dependencies = { fetchArticleText: typeof loadArticleText; fetchFeed: typeof loadFeed; discoverFeeds: typeof discoverFeeds; run: typeof runReader; connect: typeof connection; organize: typeof runOrganizer };
+type Dependencies = { fetchArticleText: typeof loadArticleText; renderArticleText?: typeof loadArticleText; fetchFeed: typeof loadFeed; discoverFeeds: typeof discoverFeeds; run: typeof runReader; connect: typeof connection; organize: typeof runOrganizer };
 const defaults: Dependencies = { fetchArticleText: loadArticleText, fetchFeed: loadFeed, discoverFeeds, run: runReader, connect: connection, organize: runOrganizer };
 
 const organizeResponseSchema = z.object({
@@ -216,7 +216,22 @@ export class Engine {
 
   private async fetchArticleText(id: string) {
     const url = this.store.article(id).url;
-    const result = await this.dependencies.fetchArticleText(url, new AbortController().signal, this.store.state.language);
+    const signal = new AbortController().signal;
+    let result: Awaited<ReturnType<typeof loadArticleText>> | undefined;
+    let failure: unknown;
+    try {
+      result = await this.dependencies.fetchArticleText(url, signal, this.store.state.language);
+    } catch (error) {
+      failure = error;
+    }
+    // A thin static extract usually means the article renders client-side; retry through the offscreen window when one is available.
+    if (this.dependencies.renderArticleText && (!result || result.text.length < THIN_ARTICLE_TEXT_LENGTH)) {
+      try {
+        const rendered = await this.dependencies.renderArticleText(url, signal, this.store.state.language);
+        if (!result || rendered.text.length > result.text.length) result = rendered;
+      } catch { /* fall back to whatever the static fetch produced */ }
+    }
+    if (!result) throw failure;
     const article = this.store.state.articles.find((item) => item.id === id);
     if (!article || article.url !== url) return;
     article.readerHtml = result.html;

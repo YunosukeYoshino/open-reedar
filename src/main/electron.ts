@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Menu, shell, dialog } from "electron";
 import { join, resolve } from "node:path";
 import { startServer } from "./server";
+import { renderArticleText } from "./render";
 import { publicUrl } from "./network";
 import { createDesktopUpdates } from "./desktop-updates";
 import { t } from "../shared/i18n";
@@ -35,7 +36,7 @@ else {
   });
   void app.whenReady().then(async () => {
     if (!app.isPackaged) app.dock?.setIcon(join(app.getAppPath(), "dist", "icon.png"));
-    runtime = await startServer({ dataDirectory: resolve(process.env.REEDAR_DATA_DIR || join(app.getPath("appData"), "Reedar")), staticDirectory: join(app.getAppPath(), "dist", "web") });
+    runtime = await startServer({ dataDirectory: resolve(process.env.REEDAR_DATA_DIR || join(app.getPath("appData"), "Reedar")), staticDirectory: join(app.getAppPath(), "dist", "web"), renderArticleText });
     const window = new BrowserWindow({
       title: "Reedar", width: 1380, height: 900, minWidth: 920, minHeight: 620,
       backgroundColor: "#1b1c21", titleBarStyle: "hiddenInset", trafficLightPosition: { x: 18, y: 18 },
