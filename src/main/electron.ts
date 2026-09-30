@@ -42,6 +42,10 @@ else {
       backgroundColor: "#1b1c21", titleBarStyle: "hiddenInset", trafficLightPosition: { x: 18, y: 18 },
       webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true },
     });
+    window.on("closed", () => {
+      // Hidden render windows must not keep the app alive once the visible UI is gone.
+      if (BrowserWindow.getAllWindows().every((win) => !win.isVisible())) app.quit();
+    });
     window.webContents.setWindowOpenHandler(({ url }) => {
       try { void shell.openExternal(publicUrl(url).href); } catch { /* Never open non-web schemes. */ }
       return { action: "deny" };
