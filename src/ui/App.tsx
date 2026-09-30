@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useState } from "react";
+import { useDeferredValue, useEffect, useRef, useState } from "react";
 import { AlertCircle, X } from "lucide-react";
 import type { Agent, Article, Conversation, ReaderState } from "../shared/schema";
 import { Sidebar } from "./Sidebar";
@@ -25,24 +25,40 @@ export function App() {
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
   const query = useDeferredValue(search.trim().toLocaleLowerCase());
+  const [globalSearch, setGlobalSearch] = useState("");
+  const lastSearch = useRef("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [aiOpen, setAiOpen] = useState(false);
   const [folderId, setFolderId] = useState<string | null>(null);
   const state = snapshot ? activeLibrary(snapshot.state) : undefined;
   const article = state?.articles.find((item) => item.id === selectedId);
   const feed = state?.feeds.find((item) => item.id === article?.feedId);
-  const feedIds = new Set(state?.feeds.filter((item) => scope.type === "all" || (scope.type === "feed" ? item.id === scope.id : item.folderId === scope.id)).map((item) => item.id));
-  const articles = state?.articles.filter((item) => feedIds.has(item.feedId) && (filter === "all" || (filter === "unread" ? !item.read || item.id === selectedId : item.starred)) && (!query || `${item.title} ${item.text}`.toLocaleLowerCase().includes(query))).sort((a, b) => b.publishedAt.localeCompare(a.publishedAt)) ?? [];
+  const feedIds = new Set(state?.feeds.filter((item) => scope.type === "feed" ? item.id === scope.id : scope.type === "folder" ? item.folderId === scope.id : true).map((item) => item.id));
+  const byId = new Map((state?.articles ?? []).map((item) => [item.id, item]));
+  const base = scope.type === "search"
+    ? (snapshot?.search?.results ?? []).map((match) => byId.get(match.id)).filter((item): item is Article => item !== undefined)
+    : (state?.articles ?? []).filter((item) => feedIds.has(item.feedId)).sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
+  const articles = base.filter((item) => (filter === "all" || (filter === "unread" ? !item.read || item.id === selectedId : item.starred)) && (!query || `${item.title} ${item.text}`.toLocaleLowerCase().includes(query)));
   const index = articles.findIndex((item) => item.id === selectedId);
   const lang = snapshot?.state.language ?? "en";
-  const title = scope.type === "all" ? t(lang, "app.allArticles") : scope.type === "feed" ? state?.feeds.find((item) => item.id === scope.id)?.title ?? t(lang, "app.feed") : state?.folders.find((item) => item.id === scope.id)?.name ?? t(lang, "app.folder");
+  const title = scope.type === "search" ? t(lang, "search.title", { query: snapshot?.search?.query ?? globalSearch.trim() }) : scope.type === "all" ? t(lang, "app.allArticles") : scope.type === "feed" ? state?.feeds.find((item) => item.id === scope.id)?.title ?? t(lang, "app.feed") : state?.folders.find((item) => item.id === scope.id)?.name ?? t(lang, "app.folder");
   const [pinnedAgent, setPinnedAgent] = useState<Agent | null>(null);
   const agent = pinnedAgent ?? snapshot?.state.defaultAgent ?? "codex";
   const setAgent = (value: Agent) => { setPinnedAgent(null); perform({ type: "app.setDefaultAgent", agent: value }); };
   const conversation = state?.conversations.find((item) => item.articleId === selectedId && item.agent === agent);
   function selectArticle(item: Article) { setSelectedId(item.id); setPinnedAgent(null); if (!item.read) perform({ type: "article.read", id: item.id, read: true }); }
   function move(offset: number) { const item = articles[index + offset]; if (item) selectArticle(item); }
-  function openConversation(item: Conversation) { setScope({ type: "all" }); setFilter("all"); setSearch(""); setSelectedId(item.articleId); setPinnedAgent(item.agent); setAiOpen(true); }
+  function openConversation(item: Conversation) { setScope({ type: "all" }); setFilter("all"); setSearch(""); setGlobalSearch(""); setSelectedId(item.articleId); setPinnedAgent(item.agent); setAiOpen(true); }
+  useEffect(() => {
+    const value = globalSearch.trim();
+    if (value === lastSearch.current) return;
+    const timer = setTimeout(() => {
+      lastSearch.current = value;
+      if (value) { setScope({ type: "search" }); perform({ type: "articles.search", query: value }); }
+      else { perform({ type: "articles.searchClear" }); setScope((current) => current.type === "search" ? { type: "all" } : current); }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [globalSearch, perform]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || event.isComposing || document.querySelector("dialog[open]") || event.target instanceof HTMLElement && (event.target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName))) return;
@@ -58,5 +74,5 @@ export function App() {
   });
   useEffect(() => { document.documentElement.lang = lang; }, [lang]);
   if (!snapshot || !state) return <div className="loading-screen"><span className="loading-dot" /><p>{connected ? t("en", "app.loadingLibrary") : t("en", "app.connecting")}</p>{error ? <p role="alert">{error}</p> : null}</div>;
-  return <LangProvider value={lang}><main className={`app-shell ${navigator.userAgent.includes("Electron") ? "desktop" : ""} ${aiOpen && article ? "ai-is-open" : ""}`}><Sidebar state={state} scope={scope} filter={filter} refreshing={snapshot.refreshing} markReadUndo={snapshot.markReadUndo ?? null} select={(value, nextFilter) => { setScope(value); setFilter(nextFilter ?? "all"); setSearch(""); setSelectedId(null); }} perform={perform} editFolder={setFolderId} /><ArticleList title={title} articles={articles} feeds={state.feeds} selectedId={selectedId} filter={filter} setFilter={(value) => { setFilter(value); setSelectedId(null); }} search={search} setSearch={setSearch} onSelect={selectArticle} /><Reader agent={agent} conversation={conversation} act={act} article={article} feed={feed} aiOpen={aiOpen} toggleAi={() => setAiOpen(!aiOpen)} perform={perform} fontSize={state.fontSize} previous={() => move(-1)} next={() => move(1)} hasPrevious={index > 0} hasNext={index < articles.length - 1} nextTitle={articles[index + 1]?.title} />{aiOpen && article ? <AiPanel key={`${article.id}:${agent}`} article={article} agent={agent} setAgent={setAgent} conversation={conversation} connections={snapshot.connections} act={act} perform={perform} close={() => setAiOpen(false)} /> : null}</main><LibraryDialogs snapshot={{ ...snapshot, state }} articles={articles} removedFeeds={snapshot.state.feeds.filter((feed) => feed.removedAt)} folderId={folderId} act={act} perform={perform} openConversation={openConversation} />{error || !connected ? <div className="toast" role="alert"><AlertCircle size={16} /><span>{error ?? t(lang, "net.disconnected")}</span>{error ? <button className="icon-button" aria-label={t(lang, "net.dismiss")} onClick={() => setError(null)}><X size={14} /></button> : null}</div> : null}</LangProvider>;
+  return <LangProvider value={lang}><main className={`app-shell ${navigator.userAgent.includes("Electron") ? "desktop" : ""} ${aiOpen && article ? "ai-is-open" : ""}`}><Sidebar state={state} scope={scope} filter={filter} refreshing={snapshot.refreshing} markReadUndo={snapshot.markReadUndo ?? null} select={(value, nextFilter) => { setScope(value); setFilter(nextFilter ?? "all"); setSearch(""); setGlobalSearch(""); setSelectedId(null); }} perform={perform} editFolder={setFolderId} searchAvailable={snapshot.searchAvailable ?? false} globalSearch={globalSearch} setGlobalSearch={setGlobalSearch} /><ArticleList title={title} articles={articles} feeds={state.feeds} selectedId={selectedId} filter={filter} setFilter={(value) => { setFilter(value); setSelectedId(null); }} search={search} setSearch={setSearch} onSelect={selectArticle} searchUnavailable={scope.type === "search" && snapshot.search?.unavailable === true} /><Reader agent={agent} conversation={conversation} act={act} article={article} feed={feed} aiOpen={aiOpen} toggleAi={() => setAiOpen(!aiOpen)} perform={perform} fontSize={state.fontSize} previous={() => move(-1)} next={() => move(1)} hasPrevious={index > 0} hasNext={index < articles.length - 1} nextTitle={articles[index + 1]?.title} />{aiOpen && article ? <AiPanel key={`${article.id}:${agent}`} article={article} agent={agent} setAgent={setAgent} conversation={conversation} connections={snapshot.connections} act={act} perform={perform} close={() => setAiOpen(false)} /> : null}</main><LibraryDialogs snapshot={{ ...snapshot, state }} articles={articles} removedFeeds={snapshot.state.feeds.filter((feed) => feed.removedAt)} folderId={folderId} act={act} perform={perform} openConversation={openConversation} />{error || !connected ? <div className="toast" role="alert"><AlertCircle size={16} /><span>{error ?? t(lang, "net.disconnected")}</span>{error ? <button className="icon-button" aria-label={t(lang, "net.dismiss")} onClick={() => setError(null)}><X size={14} /></button> : null}</div> : null}</LangProvider>;
 }

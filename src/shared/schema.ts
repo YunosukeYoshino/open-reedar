@@ -156,6 +156,8 @@ export const snapshotSchema = z.object({
   markReadUndo: z.object({ count: z.number().int().nonnegative() }).nullable().optional(),
   feedDiscovery: z.object({ url: z.string(), candidates: z.array(z.object({ url: z.string(), title: z.string() })) }).nullable().optional(),
   digest: digestSchema.nullable().optional(),
+  search: z.object({ query: z.string(), results: z.array(z.object({ id: z.string(), feedId: z.string() })), unavailable: z.boolean().optional() }).nullable().optional(),
+  searchAvailable: z.boolean().optional(),
 });
 export type Snapshot = z.infer<typeof snapshotSchema>;
 
@@ -181,6 +183,8 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("article.star"), id: z.string(), starred: z.boolean() }),
   z.object({ type: z.literal("article.note"), id: z.string(), note: z.string().max(8000) }),
   z.object({ type: z.literal("article.highlights"), id: z.string(), highlights: z.array(z.string().max(2000)).max(100) }),
+  z.object({ type: z.literal("articles.search"), query: z.string().trim().min(1).max(500) }),
+  z.object({ type: z.literal("articles.searchClear") }),
   z.object({ type: z.literal("opml.import"), xml: z.string().min(1).max(262_144), urls: z.array(z.string()).max(200).optional(), folders: z.record(z.string(), z.string().trim().min(1).max(60)).optional() }),
   z.object({ type: z.literal("opml.preview"), xml: z.string().min(1).max(262_144) }),
   z.object({ type: z.literal("opml.previewClear") }),
