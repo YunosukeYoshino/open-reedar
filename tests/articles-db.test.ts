@@ -116,4 +116,42 @@ describe("articles database", () => {
     expect(engine.snapshot.search).toBeNull();
     await engine.close();
   });
+
+  test("upserts fire the FTS triggers so stale terms do not resurface on reused rows", () => {
+    const db = ArticlesDb.open(":memory:");
+    db.write([{ ...article, title: "oldterm article" }]);
+    db.write([{ ...article, title: "newterm article" }]);
+    db.write([], ["article"]);
+    db.write([{ ...article, id: "b", title: "innocent" }]);
+    expect(db.search("oldterm")).toEqual([]);
+    expect(db.search("innocent").map((match) => match.id)).toEqual(["b"]);
+    db.close();
+  });
+
+  test("a failed database open restores articles from the migration backup", async () => {
+    const dir = join(directory, "restore-bak");
+    await mkdir(dir, { recursive: true });
+    const path = join(dir, "reader.json");
+    await writeFile(path, JSON.stringify(library([])));
+    await writeFile(`${path}.bak`, JSON.stringify(library([article])));
+    await writeFile(join(dir, "articles.db"), "GARBAGE-NOT-SQLITE");
+    const store = await Store.open(path);
+    expect(store.searchAvailable).toBe(false);
+    expect(store.article("article").title).toContain("keyboard");
+    store.close();
+  });
+
+  test("an open search refreshes when new matching articles arrive", async () => {
+    const dir = join(directory, "search-refresh");
+    const store = await Store.open(join(dir, "reader.json"));
+    const engine = new Engine(store, join(dir, "runner"), { connect });
+    await engine.initialize();
+    await engine.dispatch({ type: "articles.search", query: "keyboard" });
+    expect(engine.snapshot.search?.results).toEqual([]);
+    store.mergeFeed(feed, [article]);
+    await store.save();
+    await engine.dispatch({ type: "article.read", id: article.id, read: true });
+    expect(engine.snapshot.search?.results.map((match) => match.id)).toEqual(["article"]);
+    await engine.close();
+  });
 });

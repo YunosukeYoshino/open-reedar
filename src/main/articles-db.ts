@@ -84,6 +84,8 @@ export class ArticlesDb {
       db = new DatabaseSync(path);
       db.exec("PRAGMA journal_mode = WAL");
       db.exec("PRAGMA busy_timeout = 2000");
+      // INSERT OR REPLACE's implicit delete only fires DELETE triggers under recursive_triggers; without it FTS entries orphan.
+      db.exec("PRAGMA recursive_triggers = ON");
       const version = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
       if (version > 1) throw new Error(`articles.db is a newer version (${version})`);
       db.exec(SCHEMA);

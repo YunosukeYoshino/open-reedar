@@ -75,7 +75,15 @@ export class Engine {
 
   subscribe(listener: (update: Update) => void) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private emit(update: Update) { for (const listener of this.listeners) listener(update); }
-  private changed() { this.emit({ type: "snapshot", snapshot: this.snapshot }); }
+  private changed() {
+    // An open search re-runs only after article rows actually changed, so refreshes and text fetches surface in the results.
+    if (this.searchResults && this.store.articlesChanged) {
+      this.store.articlesChanged = false;
+      const results = this.store.searchArticles(this.searchResults.query);
+      this.searchResults = { query: this.searchResults.query, results: results ?? [], unavailable: results === null || undefined };
+    }
+    this.emit({ type: "snapshot", snapshot: this.snapshot });
+  }
 
   private t(key: MessageKey, params?: Record<string, string | number>) { return t(this.store.state.language, key, params); }
 

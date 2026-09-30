@@ -9,6 +9,8 @@ import type { SearchMatch } from "./articles-db";
 
 export class Store {
   state: ReaderState;
+  /** Set whenever a save actually wrote article rows; lets the engine re-run an open search only after real changes. */
+  articlesChanged = false;
   private writing: Promise<void> = Promise.resolve();
   private db: ArticlesDb | null;
   private revisions = new Map<string, string>();
@@ -36,6 +38,13 @@ export class Store {
       console.error("reedar: article database unavailable, running without search", error);
     }
     const store = new Store(path, state, db);
+    if (!db && state.articles.length === 0) {
+      // A migrated reader.json carries no articles; when the DB cannot open, fall back to the pre-migration backup so the library is not empty.
+      try {
+        const backup = stateSchema.parse(JSON.parse(await readFile(`${path}.bak`, "utf8")));
+        if (backup.articles.length) state.articles = backup.articles;
+      } catch { /* no usable backup; start empty */ }
+    }
     if (db) {
       if (state.articles.length) {
         db.merge(state.articles);
@@ -90,6 +99,7 @@ export class Store {
     const removed = [...this.revisions.keys()].filter((id) => !seen.has(id));
     if (!changed.size && !removed.length) return;
     this.db!.write([...changed.values()].map((entry) => entry.article), removed);
+    this.articlesChanged = true;
     for (const [id, { serialized }] of changed) this.revisions.set(id, serialized);
     for (const id of removed) this.revisions.delete(id);
   }
