@@ -467,4 +467,32 @@ describe("reading workflow", () => {
     expect(question.length).toBeGreaterThan(0);
     await engine.close();
   });
+  test("digest runs the apple agent on the pcc tier and records the emitted notice", async () => {
+    const models: (string | undefined)[] = [];
+    const { engine, store, article } = await setup("digest-pcc", async (_agent, _conversation, _q, _cwd, _signal, emit, _lang, model) => {
+      models.push(model);
+      emit({ type: "notice", text: "cloud" });
+      emit({ type: "delta", text: "Digest" });
+    });
+    const second = await parseFeed(xml.replaceAll("article", "peer"), "https://example.com/rss", null);
+    store.state.articles.push(...second.articles);
+    await engine.dispatch({ type: "digest.run", articleIds: [article.id, second.articles[0]!.id], agent: "apple" });
+    await engine.settle();
+    expect(models).toEqual(["pcc"]);
+    expect(engine.snapshot.digest).toMatchObject({ status: "completed", notice: "cloud" });
+    await engine.close();
+  });
+  test("the apple model setting persists and an agent notice lands on the assistant message", async () => {
+    const { engine, store, article, path } = await setup("apple-model", async (_agent, _conversation, _q, _cwd, _signal, emit) => {
+      emit({ type: "notice", text: "cloud answer" });
+      emit({ type: "delta", text: "Answer" });
+    });
+    await engine.dispatch({ type: "app.setAppleModel", model: "pcc" });
+    expect(store.state.appleModel).toBe("pcc");
+    expect((await Store.open(path)).state.appleModel).toBe("pcc");
+    await engine.dispatch({ type: "chat.send", articleId: article.id, agent: "apple", text: "Summarize" });
+    await engine.settle();
+    expect(store.state.conversations[0]?.messages.at(-1)).toMatchObject({ notice: "cloud answer", text: "Answer", state: { status: "completed" } });
+    await engine.close();
+  });
 });
