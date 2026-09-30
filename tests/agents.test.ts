@@ -152,9 +152,10 @@ describe("reading context", () => {
       else process.env.REEDAR_APPLE_BIN = previous;
     }
   });
-  test("runReader truncates oversized article text for the on-device Apple model", async () => {
-    const fm = join(directory, "fm-long");
-    await writeFile(fm, "#!/bin/sh\necho -n \"$2\" | wc -c\n");
+  test("runReader condenses oversized article text before the reader call for the on-device Apple model", async () => {
+    const calls = join(directory, "fm-calls.log");
+    const fm = join(directory, "fm-condense");
+    await writeFile(fm, `#!/bin/sh\necho call >> "${calls}"\nprintf 'condensed'\n`);
     await Bun.spawn(["chmod", "+x", fm]).exited;
     const previous = process.env.REEDAR_APPLE_BIN;
     process.env.REEDAR_APPLE_BIN = fm;
@@ -162,7 +163,9 @@ describe("reading context", () => {
       const big = { ...conversation, agent: "apple" as const, source: { ...conversation.source, text: "a".repeat(100_000) } };
       const output: string[] = [];
       await runReader("apple", big, "要約して", directory, new AbortController().signal, (event) => { if (event.type === "delta") output.push(event.text); });
-      expect(Number(output.at(-1))).toBeLessThan(31_000);
+      // Chunk condensations plus the final reader call; the old code made a single truncated call.
+      expect((await Bun.file(calls).text()).trim().split("\n").length).toBeGreaterThan(2);
+      expect(output.at(-1)).toBe("condensed");
     } finally {
       if (previous === undefined) delete process.env.REEDAR_APPLE_BIN;
       else process.env.REEDAR_APPLE_BIN = previous;
