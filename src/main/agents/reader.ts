@@ -1,12 +1,12 @@
 import { createInterface } from "node:readline";
 import { StringDecoder } from "node:string_decoder";
 import { z } from "zod";
-import type { Agent, Connection, Conversation, Language } from "../../shared/schema";
+import type { Agent, AppleModel, Connection, Conversation, Language } from "../../shared/schema";
 import { codexModel } from "../../shared/schema";
 import { t } from "../../shared/i18n";
 import { claudeArguments, cliNames, codexArguments, executable, launch, RpcClient, terminate } from "./process";
 
-export type AgentEvent = { type: "delta"; text: string } | { type: "waiting"; reason: string };
+export type AgentEvent = { type: "delta"; text: string } | { type: "waiting"; reason: string } | { type: "notice"; text: string };
 export class LocalizedError extends Error {}
 export class AuthenticationRequired extends LocalizedError {}
 
@@ -90,45 +90,73 @@ export function agentError(error: unknown, lang: Language = "en") {
 }
 
 // The on-device model context is ~8k tokens, so fm prompts are capped at 30k chars with the article text truncated first.
-const fmPromptLimit = 30_000;
+export const fmPromptLimit = 30_000;
+// Private Cloud Compute answers run in a ~32K-token context, so prompts sent with --model pcc are capped at 100k chars.
+export const fmPccPromptLimit = 100_000;
 
-export async function runReader(agent: Agent, conversation: Conversation, question: string, cwd: string, signal: AbortSignal, emit: (event: AgentEvent) => void, lang: Language = "en") {
+// Shrinks the article text until the serialized fm prompt fits the tier's cap, like the on-device path always did.
+function fitFmPrompt(header: string, conversation: Conversation, question: string, cap: number, lang: Language) {
+  let fmPrompt = header + readerPrompt(conversation, question, lang);
+  if (fmPrompt.length > cap) {
+    const fit = conversation.source.text.length - (fmPrompt.length - cap);
+    if (fit <= 0) throw new LocalizedError(t(lang, "err.tooLong"));
+    fmPrompt = header + readerPrompt({ ...conversation, source: { ...conversation.source, text: conversation.source.text.slice(0, fit) } }, question, lang);
+    if (fmPrompt.length > cap) throw new LocalizedError(t(lang, "err.tooLong"));
+  }
+  return fmPrompt;
+}
+
+export async function runReader(agent: Agent, conversation: Conversation, question: string, cwd: string, signal: AbortSignal, emit: (event: AgentEvent) => void, lang: Language = "en", appleModel: AppleModel = "system") {
   if (agent === "antigravity") throw new LocalizedError(t(lang, "err.antigravity"));
   const prompt = readerPrompt(conversation, question, lang);
   if (signal.aborted) throw new LocalizedError(t(lang, "err.aborted"));
   const path = await executable(agent);
   if (agent === "apple") {
     const header = `${sessionProfile("reader", lang).instructions}\n\n`;
-    let fmPrompt = header + prompt;
-    if (fmPrompt.length > fmPromptLimit) {
-      const fit = conversation.source.text.length - (fmPrompt.length - fmPromptLimit);
-      if (fit <= 0) throw new LocalizedError(t(lang, "err.tooLong"));
-      fmPrompt = header + readerPrompt({ ...conversation, source: { ...conversation.source, text: conversation.source.text.slice(0, fit) } }, question, lang);
-      if (fmPrompt.length > fmPromptLimit) throw new LocalizedError(t(lang, "err.tooLong"));
-    }
-    return runFm(path, fmPrompt, cwd, signal, emit, lang);
+    // A prompt that exceeds the on-device context escalates to Private Cloud Compute instead of truncating to 30k chars.
+    let model = appleModel;
+    if (header.length + prompt.length > fmPromptLimit && model === "system") model = "pcc";
+    const fmPrompt = fitFmPrompt(header, conversation, question, model === "pcc" ? fmPccPromptLimit : fmPromptLimit, lang);
+    if (model === "pcc") emit({ type: "notice", text: t(lang, appleModel === "system" ? "notice.pccEscalated" : "notice.pcc") });
+    return runFm(path, fmPrompt, cwd, signal, emit, lang, model);
   }
   if (agent === "claude") return runClaude(path, prompt, cwd, signal, emit, "reader", lang);
   return runCodex(path, prompt, cwd, signal, emit, undefined, "reader", lang);
 }
 
-export async function runOrganizer(agent: Agent, prompt: string, cwd: string, signal: AbortSignal, emit: (event: AgentEvent) => void, lang: Language = "en") {
+export async function runOrganizer(agent: Agent, prompt: string, cwd: string, signal: AbortSignal, emit: (event: AgentEvent) => void, lang: Language = "en", appleModel: AppleModel = "system") {
   if (agent === "antigravity") throw new LocalizedError(t(lang, "err.antigravity"));
   if (prompt.length > 180_000) throw new LocalizedError(t(lang, "err.organizeTooLarge"));
   if (signal.aborted) throw new LocalizedError(t(lang, "err.aborted"));
   const path = await executable(agent);
   if (agent === "apple") {
-    const fmPrompt = `${sessionProfile("organizer", lang).instructions}\n\n${prompt}`;
-    if (fmPrompt.length > fmPromptLimit) throw new LocalizedError(t(lang, "err.organizeTooLarge"));
-    return runFm(path, fmPrompt, cwd, signal, emit, lang);
+    const header = `${sessionProfile("organizer", lang).instructions}\n\n`;
+    const fmPrompt = header + prompt;
+    let model = appleModel;
+    if (fmPrompt.length > fmPromptLimit && model === "system") model = "pcc";
+    if (fmPrompt.length > (model === "pcc" ? fmPccPromptLimit : fmPromptLimit)) throw new LocalizedError(t(lang, "err.organizeTooLarge"));
+    if (model === "pcc") emit({ type: "notice", text: t(lang, appleModel === "system" ? "notice.pccEscalated" : "notice.pcc") });
+    return runFm(path, fmPrompt, cwd, signal, emit, lang, model);
   }
   if (agent === "claude") return runClaude(path, prompt, cwd, signal, emit, "organizer", lang);
   return runCodex(path, prompt, cwd, signal, emit, undefined, "organizer", lang);
 }
 
-async function runFm(path: string, prompt: string, cwd: string, signal: AbortSignal, emit: (event: AgentEvent) => void, lang: Language = "en") {
+// A cloud-tier failure falls back to the on-device model only when the prompt fits it; the user is always told which tier answered.
+async function runFm(path: string, prompt: string, cwd: string, signal: AbortSignal, emit: (event: AgentEvent) => void, lang: Language = "en", model: AppleModel = "system") {
+  try {
+    await fmRespond(path, prompt, model, cwd, signal, emit, lang);
+  } catch (error) {
+    if (signal.aborted || model === "system") throw error;
+    if (prompt.length > fmPromptLimit) throw new LocalizedError(t(lang, "err.pccFailed"));
+    emit({ type: "notice", text: t(lang, "notice.pccFallback") });
+    await fmRespond(path, prompt, "system", cwd, signal, emit, lang);
+  }
+}
+
+async function fmRespond(path: string, prompt: string, model: AppleModel, cwd: string, signal: AbortSignal, emit: (event: AgentEvent) => void, lang: Language = "en") {
   await new Promise<void>((resolve, reject) => {
-    const child = launch(path, ["respond", prompt], cwd);
+    const child = launch(path, model === "pcc" ? ["respond", "--model", "pcc", prompt] : ["respond", prompt], cwd);
     const decoder = new StringDecoder("utf8");
     let text = "";
     let failure: Error | null = null;

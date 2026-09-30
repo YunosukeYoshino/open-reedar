@@ -467,4 +467,65 @@ describe("reading workflow", () => {
     expect(question.length).toBeGreaterThan(0);
     await engine.close();
   });
+  test("digest runs the apple agent on the pcc tier and records the emitted notice", async () => {
+    const models: (string | undefined)[] = [];
+    const { engine, store, article } = await setup("digest-pcc", async (_agent, _conversation, _q, _cwd, _signal, emit, _lang, model) => {
+      models.push(model);
+      emit({ type: "notice", text: "cloud" });
+      emit({ type: "delta", text: "Digest" });
+    });
+    const second = await parseFeed(xml.replaceAll("article", "peer"), "https://example.com/rss", null);
+    store.state.articles.push(...second.articles);
+    await engine.dispatch({ type: "digest.run", articleIds: [article.id, second.articles[0]!.id], agent: "apple" });
+    await engine.settle();
+    expect(models).toEqual(["pcc"]);
+    expect(engine.snapshot.digest).toMatchObject({ status: "completed", notice: "cloud" });
+    await engine.close();
+  });
+  test("digest keeps every selected article in the prompt when text is newline-heavy", async () => {
+    let source = "";
+    const { engine, store, article } = await setup("digest-escape", async (_agent, conversation) => { source = conversation.source.text; });
+    const articles = Array.from({ length: 20 }, (_, i) => ({ ...article, id: `a${i}`, title: `A${i}`, text: "line\n".repeat(3000) }));
+    store.state.articles.push(...articles);
+    await engine.dispatch({ type: "digest.run", articleIds: articles.map((item) => item.id), agent: "apple" });
+    await engine.settle();
+    for (let i = 0; i < 20; i++) expect(source).toContain(`## A${i}\n`);
+    await engine.close();
+  });
+  test("digest keeps a body floor and stays under budget when titles alone exceed it", async () => {
+    let source = "";
+    const { engine, store, article } = await setup("digest-floor", async (_agent, conversation) => { source = conversation.source.text; });
+    const articles = Array.from({ length: 20 }, (_, i) => ({ ...article, id: `g${i}`, title: `T${i}` + "T".repeat(4600), text: `body${i} `.repeat(400) }));
+    store.state.articles.push(...articles);
+    await engine.dispatch({ type: "digest.run", articleIds: articles.map((item) => item.id), agent: "apple" });
+    await engine.settle();
+    expect(source.length).toBeLessThan(92_000);
+    expect(source).toContain(`body${19} `);
+    await engine.close();
+  });
+  test("digest shrinks an escape-heavy title instead of dropping the body", async () => {
+    let source = "";
+    const { engine, store, article } = await setup("digest-quotes", async (_agent, conversation) => { source = conversation.source.text; });
+    const quoted = { ...article, id: "quoted", title: "\"".repeat(14_000), text: "key finding" };
+    const short = { ...article, id: "short", title: "Short", text: "ok" };
+    store.state.articles.push(quoted, short);
+    await engine.dispatch({ type: "digest.run", articleIds: ["quoted", "short"], agent: "codex" });
+    await engine.settle();
+    expect(source).toContain("key finding");
+    expect(source).toContain(quoted.url);
+    await engine.close();
+  });
+  test("the apple model setting persists and an agent notice lands on the assistant message", async () => {
+    const { engine, store, article, path } = await setup("apple-model", async (_agent, _conversation, _q, _cwd, _signal, emit) => {
+      emit({ type: "notice", text: "cloud answer" });
+      emit({ type: "delta", text: "Answer" });
+    });
+    await engine.dispatch({ type: "app.setAppleModel", model: "pcc" });
+    expect(store.state.appleModel).toBe("pcc");
+    expect((await Store.open(path)).state.appleModel).toBe("pcc");
+    await engine.dispatch({ type: "chat.send", articleId: article.id, agent: "apple", text: "Summarize" });
+    await engine.settle();
+    expect(store.state.conversations[0]?.messages.at(-1)).toMatchObject({ notice: "cloud answer", text: "Answer", state: { status: "completed" } });
+    await engine.close();
+  });
 });
