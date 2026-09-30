@@ -523,6 +523,38 @@ describe("reading workflow", () => {
     await engine.dispatch({ type: "library.import", json: JSON.stringify({ version: 1, exportedAt: "", feeds: [], folders: [], articles: [], settings: {} }) });
     expect(store.state.feeds).toHaveLength(0);
     expect(store.state.articles).toHaveLength(0);
+    const hostile = JSON.parse(JSON.stringify(before.articles[0])) as Article;
+    hostile.html = "<p>Body</p><script>alert(1)</script><iframe src=\"https://evil.example\"></iframe>";
+    hostile.readerHtml = "<p>Reader</p><script>alert(1)</script>";
+    await engine.dispatch({ type: "library.import", json: JSON.stringify({ version: 1, exportedAt: "", feeds: before.feeds, folders: [], articles: [hostile], settings: {} }) });
+    expect(store.state.articles[0]?.html).toBe("<p>Body</p>");
+    expect(store.state.articles[0]?.readerHtml).toBe("<p>Reader</p>");
+    await engine.close();
+  });
+
+  test("restoring while a refresh is in flight does not lose the backup to late merges", async () => {
+    let release: (() => void) | undefined;
+    const waiting = new Promise<void>((resolve) => { release = resolve; });
+    const path = join(directory, "library-race", "state.json");
+    const store = await Store.open(path);
+    const parsed = await parseFeed(xml, "https://example.com/rss", null);
+    store.mergeFeed(parsed.feed, parsed.articles);
+    const connect: typeof connection = async (agent) => ({ agent, installed: true, status: "ready", detail: "fixture" });
+    const engine = new Engine(store, join(directory, "library-race", "runner"), {
+      run: async () => {}, connect,
+      fetchFeed: async (url, folderId) => { await waiting; return parseFeed(xml.replaceAll("article", "fresh"), url, folderId); },
+    });
+    await engine.initialize();
+    const refreshing = engine.dispatch({ type: "refresh" });
+    const backup = structuredClone(await engine.dispatch({ type: "library.export" })) as { articles: { id: string; title: string }[] };
+    backup.articles[0]!.title = "Restored title";
+    const importing = engine.dispatch({ type: "library.import", json: JSON.stringify(backup) });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    release?.();
+    await Promise.all([refreshing, importing]);
+    expect(store.state.articles.map((item) => item.title)).toEqual(["Restored title"]);
+    expect(store.state.articles.map((item) => item.id)).toEqual([parsed.articles[0]!.id]);
+    expect(store.state.articles[0]?.read).toBe(false);
     await engine.close();
   });
 

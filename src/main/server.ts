@@ -26,7 +26,7 @@ function matchesToken(received: string | undefined, token: string) {
   return input.length === expected.length && timingSafeEqual(input, expected);
 }
 
-export async function requestBody(request: AsyncIterable<unknown>, maximumBytes = 32_000) {
+export async function requestText(request: AsyncIterable<unknown>, maximumBytes = 32_000) {
   const chunks: Buffer[] = [];
   let length = 0;
   for await (const chunk of request) {
@@ -35,7 +35,11 @@ export async function requestBody(request: AsyncIterable<unknown>, maximumBytes 
     if (length > maximumBytes) throw new Error(t("en", "err.inputTooLarge"));
     chunks.push(chunk);
   }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+export async function requestBody(request: AsyncIterable<unknown>, maximumBytes = 32_000) {
+  return JSON.parse(await requestText(request, maximumBytes)) as unknown;
 }
 
 export async function startServer(options: Options) {
@@ -80,7 +84,10 @@ export async function startServer(options: Options) {
     }
     if (request.method === "POST" && url.pathname === "/api/action") {
       if (request.headers.origin !== origin || !request.headers["content-type"]?.startsWith("application/json")) return json(response, 403, { error: t(store.state.language, "err.externalAction") });
-      const result = actionSchema.safeParse(await requestBody(request, 33 * 1024 * 1024));
+      const body = await requestText(request, 33 * 1024 * 1024);
+      // Only library imports may carry a multi-megabyte payload; other actions stay at the ordinary limit and are rejected before the full JSON parse.
+      if (body.length > 1024 * 1024 && !/"type"\s*:\s*"library\.import"/.test(body.slice(0, 256))) return json(response, 400, { error: t(store.state.language, "err.checkInput") });
+      const result = actionSchema.safeParse(JSON.parse(body));
       if (!result.success) return json(response, 400, { error: t(store.state.language, "err.checkInput") });
       const outcome = await engine.dispatch(result.data);
       return json(response, 200, outcome === undefined ? { ok: true } : { ok: true, result: outcome });
