@@ -492,6 +492,17 @@ describe("reading workflow", () => {
     for (let i = 0; i < 20; i++) expect(source).toContain(`## A${i}\n`);
     await engine.close();
   });
+  test("digest keeps a body floor when a title alone exceeds the per-article budget", async () => {
+    let source = "";
+    const { engine, store, article } = await setup("digest-floor", async (_agent, conversation) => { source = conversation.source.text; });
+    const huge = { ...article, id: "huge", title: "T".repeat(16000), text: "body ".repeat(400) };
+    const short = { ...article, id: "short", title: "Short", text: "ok" };
+    store.state.articles.push(huge, short);
+    await engine.dispatch({ type: "digest.run", articleIds: ["huge", "short"], agent: "apple" });
+    await engine.settle();
+    expect(source).toContain("body ".repeat(100));
+    await engine.close();
+  });
   test("the apple model setting persists and an agent notice lands on the assistant message", async () => {
     const { engine, store, article, path } = await setup("apple-model", async (_agent, _conversation, _q, _cwd, _signal, emit) => {
       emit({ type: "notice", text: "cloud answer" });

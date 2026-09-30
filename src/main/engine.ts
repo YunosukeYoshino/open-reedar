@@ -469,9 +469,10 @@ export class Engine {
     const blockFor = (article: (typeof picked)[number]) => {
       const header = `## ${article.title}\n${article.url}\n\n`;
       const text = article.readerText ?? article.text;
+      // Keep at least 500 chars of body even when an oversized header alone exceeds the budget; an empty body would summarize nothing.
       let slice = text.slice(0, perArticle);
-      while (slice && JSON.stringify(header + slice).length > perArticle) {
-        slice = slice.slice(0, Math.max(0, Math.floor(slice.length * perArticle / JSON.stringify(header + slice).length) - 1));
+      while (slice.length > 500 && JSON.stringify(header + slice).length > perArticle) {
+        slice = slice.slice(0, Math.max(500, Math.floor(slice.length * perArticle / JSON.stringify(header + slice).length) - 1));
       }
       return header + slice;
     };
