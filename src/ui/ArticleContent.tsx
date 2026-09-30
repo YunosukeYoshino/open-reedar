@@ -6,7 +6,7 @@ import { agentName } from "./format";
 import { useT } from "./i18n";
 import { MarkdownText } from "./MarkdownText";
 
-type Props = { article: Article; agent: Agent; conversation: Conversation | undefined; act: (action: Action) => Promise<void>; perform: (action: Action) => void; webView: boolean };
+type Props = { article: Article; agent: Agent; conversation: Conversation | undefined; act: (action: Action) => Promise<unknown>; perform: (action: Action) => void; webView: boolean };
 
 export function ArticleContent({ article, agent, conversation, act, perform, webView }: Props) {
   const t = useT();

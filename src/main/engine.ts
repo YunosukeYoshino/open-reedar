@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { z } from "zod";
-import type { Action, Agent, CliInstall, Connection, Conversation, DigestJob, OpmlImport, OpmlPreview, OrganizeJob, Snapshot, Update } from "../shared/schema";
-import { agentSchema, codexModel } from "../shared/schema";
+import type { Action, Agent, CliInstall, Connection, Conversation, DigestJob, LibraryExport, OpmlImport, OpmlPreview, OrganizeJob, Snapshot, Update } from "../shared/schema";
+import { agentSchema, codexModel, libraryExportSchema } from "../shared/schema";
 import { agentError, AuthenticationRequired, connection, LocalizedError, runOrganizer, runReader } from "./agents/reader";
 import { loadArticleText } from "./article-text";
-import { discoverFeeds, loadFeed } from "./feeds";
+import { cleanArticle, discoverFeeds, loadFeed } from "./feeds";
 import { parseOpml } from "./opml";
 import { publicUrl } from "./network";
 import { Store } from "./store";
@@ -49,6 +49,7 @@ export class Engine {
   async initialize() {
     await mkdir(this.runnerDirectory, { recursive: true, mode: 0o700 });
     this.scheduleAutoRefresh();
+    if (this.pruneOldArticles()) await this.store.save();
     await this.refreshConnections();
   }
 
@@ -114,6 +115,7 @@ export class Engine {
         if (existing) throw new Error(this.t("err.feedExists"));
         const result = await this.dependencies.fetchFeed(url, this.store.folder(action.folderId), undefined, this.store.state.language);
         this.store.mergeFeed({ ...result.feed, etag: result.etag, lastModified: result.lastModified }, result.articles);
+        this.pruneOldArticles();
         this.feedDiscoveryToken++;
         this.feedDiscovery = null;
         break;
@@ -179,6 +181,7 @@ export class Engine {
       case "app.setRefreshInterval": this.store.state.refreshMinutes = action.minutes; this.scheduleAutoRefresh(); break;
       case "app.setFontSize": this.store.state.fontSize = action.size; break;
       case "app.setDefaultAgent": this.store.state.defaultAgent = action.agent; break;
+      case "app.setArticlesRetention": this.store.state.articlesRetentionDays = action.days; this.pruneOldArticles(); break;
       case "digest.run": this.runDigest(action.articleIds, action.agent); return;
       case "digest.cancel": this.digestJob?.controller.abort(); return;
       case "digest.clear": {
@@ -191,6 +194,8 @@ export class Engine {
       case "opml.preview": return this.previewOpml(action.xml);
       case "opml.previewClear": this.opmlPreview = null; this.changed(); return;
       case "opml.stop": this.importJob?.controller.abort(); return;
+      case "library.export": return this.exportLibrary();
+      case "library.import": return this.importLibrary(action.json);
       case "organize.propose": return this.proposeOrganize(action.agent, action.scope);
       case "organize.apply": this.applyOrganize(action.moves, action.assignments); break;
       case "organize.cancel": this.organizeRun?.controller.abort(); this.organize = null; this.changed(); return;
@@ -209,6 +214,12 @@ export class Engine {
       case "chat.send": return this.send(action.articleId, action.agent, action.text);
       case "chat.summarize": return this.send(action.articleId, action.agent, this.t("prompt.summarize"), "summary");
       case "chat.stop": return this.stop(action.conversationId);
+      case "chat.delete": {
+        if (!this.store.state.conversations.some((item) => item.id === action.conversationId)) throw new Error(this.t("err.conversationMissing"));
+        this.jobs.get(action.conversationId)?.controller.abort();
+        this.store.state.conversations = this.store.state.conversations.filter((item) => item.id !== action.conversationId);
+        break;
+      }
     }
     await this.store.save();
     this.changed();
@@ -305,7 +316,7 @@ export class Engine {
       } catch {
         report.status = "failed";
         report.error = this.t("err.importFailed");
-      } finally { this.importJob = undefined; this.opmlPreview = null; this.changed(); }
+      } finally { this.importJob = undefined; this.opmlPreview = null; if (this.pruneOldArticles()) await this.store.save(); this.changed(); }
     })();
     this.importJob = { controller, done };
     void done.catch(() => {});
@@ -449,7 +460,11 @@ export class Engine {
         }));
         await this.store.save();
       }
-    } finally { this.refreshing = false; this.changed(); }
+    } finally {
+      this.refreshing = false;
+      if (this.pruneOldArticles()) await this.store.save();
+      this.changed();
+    }
   }
 
   private runDigest(articleIds: string[], agent: Agent) {
@@ -490,6 +505,72 @@ export class Engine {
     })();
     this.digestJob = { controller, done };
     void done.catch(() => { this.changed(); });
+  }
+
+  private exportLibrary(): LibraryExport {
+    const state = this.store.state;
+    return {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      folders: structuredClone(state.folders),
+      feeds: structuredClone(state.feeds),
+      articles: structuredClone(state.articles),
+      settings: {
+        language: state.language,
+        refreshInterval: state.refreshMinutes,
+        fontSize: state.fontSize,
+        defaultAgent: state.defaultAgent,
+        articlesRetentionDays: state.articlesRetentionDays,
+      },
+    };
+  }
+
+  private async importLibrary(raw: string) {
+    let backup: LibraryExport;
+    try { backup = libraryExportSchema.parse(JSON.parse(raw)); }
+    catch { throw new LocalizedError(this.t("err.libraryInvalid")); }
+    // Writers that merge into state (feed refresh, OPML import) must finish first or their late results would land on top of the restored library. New ones can be dispatched while waiting, so loop until none remain; the replacement below then runs without awaiting.
+    this.importJob?.controller.abort();
+    while (this.importJob || this.refreshJob) await Promise.allSettled([this.importJob?.done, this.refreshJob]);
+    const articleIds = new Set(backup.articles.map((article) => article.id));
+    for (const conversation of this.store.state.conversations) {
+      if (!articleIds.has(conversation.articleId)) this.jobs.get(conversation.id)?.controller.abort();
+    }
+    const state = this.store.state;
+    state.folders = backup.folders;
+    state.feeds = backup.feeds;
+    // Backup HTML bypasses the fetch-time sanitizer, so it is cleaned again here before it reaches dangerouslySetInnerHTML.
+    state.articles = backup.articles.map((article) => ({ ...article, html: cleanArticle(article.html, article.url).html, ...(article.readerHtml === undefined ? {} : { readerHtml: cleanArticle(article.readerHtml, article.url).html }) }));
+    state.conversations = state.conversations.filter((conversation) => articleIds.has(conversation.articleId));
+    const settings = backup.settings;
+    const languageChanged = settings.language !== undefined && settings.language !== state.language;
+    if (settings.language !== undefined) state.language = settings.language;
+    if (settings.refreshInterval !== undefined) { state.refreshMinutes = settings.refreshInterval; this.scheduleAutoRefresh(); }
+    if (settings.fontSize !== undefined) state.fontSize = settings.fontSize;
+    if (settings.defaultAgent !== undefined) state.defaultAgent = settings.defaultAgent;
+    if (settings.articlesRetentionDays !== undefined) state.articlesRetentionDays = settings.articlesRetentionDays;
+    this.markReadUndoIds = [];
+    this.pruneOldArticles();
+    if (languageChanged) void this.refreshConnections();
+    await this.store.save();
+    this.changed();
+  }
+
+  private pruneOldArticles() {
+    const days = this.store.state.articlesRetentionDays;
+    if (!days) return false;
+    const cutoff = Date.now() - days * 86_400_000;
+    const articles = this.store.state.articles;
+    const kept = articles.filter((article) => article.read || article.starred || article.note?.trim() || article.highlights?.length || Date.parse(article.publishedAt) >= cutoff);
+    if (kept.length === articles.length) return false;
+    const keptIds = new Set(kept.map((article) => article.id));
+    this.store.state.articles = kept;
+    for (const conversation of this.store.state.conversations) {
+      if (!keptIds.has(conversation.articleId)) this.jobs.get(conversation.id)?.controller.abort();
+    }
+    this.store.state.conversations = this.store.state.conversations.filter((conversation) => keptIds.has(conversation.articleId));
+    this.markReadUndoIds = this.markReadUndoIds.filter((id) => keptIds.has(id));
+    return true;
   }
 
   private async send(articleId: string, agent: Conversation["agent"], text: string, purpose: "chat" | "summary" = "chat") {

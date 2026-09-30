@@ -27,12 +27,13 @@ export function useReader() {
     return () => stream.close();
   }, []);
 
-  const act = useCallback(async (action: Action) => {
+  const act = useCallback(async (action: Action): Promise<unknown> => {
     const response = await fetch("/api/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(action) });
     if (!response.ok) {
       const result = z.object({ error: z.string() }).safeParse(await response.json());
       throw new Error(result.success ? result.data.error : t(language.current, "net.actionFailed"));
     }
+    return response.json();
   }, []);
 
   const perform = useCallback((action: Action) => {

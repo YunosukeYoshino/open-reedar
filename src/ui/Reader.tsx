@@ -6,7 +6,7 @@ import { ArticleContent } from "./ArticleContent";
 import { domain, readingMinutes } from "./format";
 import { useFormatters, useT } from "./i18n";
 
-type Props = { agent: Agent; conversation: Conversation | undefined; act: (action: Action) => Promise<void>; article: Article | undefined; feed: Feed | undefined; aiOpen: boolean; toggleAi: () => void; perform: (action: Action) => void; fontSize: ReaderState["fontSize"]; previous: () => void; next: () => void; hasPrevious: boolean; hasNext: boolean; nextTitle: string | undefined };
+type Props = { agent: Agent; conversation: Conversation | undefined; act: (action: Action) => Promise<unknown>; article: Article | undefined; feed: Feed | undefined; aiOpen: boolean; toggleAi: () => void; perform: (action: Action) => void; fontSize: ReaderState["fontSize"]; previous: () => void; next: () => void; hasPrevious: boolean; hasNext: boolean; nextTitle: string | undefined };
 
 function ArticleNotes({ article, perform }: { article: Article; perform: (action: Action) => void }) {
   const t = useT();

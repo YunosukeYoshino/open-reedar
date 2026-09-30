@@ -153,6 +153,9 @@ const en = {
   "ai.appleLocal": "On-device",
   "ai.copyConversation": "Copy conversation as Markdown",
   "ai.copied": "Copied",
+  "ai.deleteConversation": "Delete conversation",
+  "ai.deleteConfirm": "Delete this conversation? The article stays in your library.",
+  "ai.delete": "Delete",
 
   // Run states
   "run.running": "Answering",
@@ -210,6 +213,10 @@ const en = {
   "conn.language": "Language",
   "conn.languageEnglish": "English",
   "conn.languageJapanese": "Japanese",
+  "conn.retention": "Keep articles",
+  "conn.retentionDescription": "Unread articles older than the limit are removed on refresh. Starred, read, and noted articles are always kept.",
+  "conn.retentionForever": "Forever",
+  "conn.retentionDays": "{days} days",
 
   // Activity dialog
   "activity.title": "AI conversations",
@@ -291,6 +298,21 @@ const en = {
   "opml.counts": "Imported {imported} · Skipped {skipped} · Failed {failed}",
   "opml.cancelNote": "Feeds registered before the stop are kept.",
 
+  // Library backup
+  "library.backupTitle": "Library backup",
+  "library.backupDescription": "Export the whole library — feeds, folders, articles, and settings — to a JSON file, or restore a backup to replace the current library.",
+  "library.export": "Export library",
+  "library.exporting": "Exporting…",
+  "library.exportFailed": "Could not export the library.",
+  "library.fileLabel": "Library file to restore",
+  "library.fileTooLarge": "Choose a library file up to 32 MB.",
+  "library.readFailed": "Could not read the file.",
+  "library.invalidFile": "This file is not a Reedar library backup.",
+  "library.restoreSummary": "This backup holds {feeds} feeds, {folders} folders, and {articles} articles. The current library will be replaced.",
+  "library.restoreApply": "Replace library",
+  "library.restoreFailed": "Could not restore the library.",
+  "library.restored": "Library restored.",
+
   // OPML result / resolution labels
   "opml.result.imported": "Imported",
   "opml.result.skipped": "Skipped",
@@ -317,6 +339,8 @@ const en = {
   "err.folderNameLong": "Folder names are limited to 60 characters.",
   "err.removedFeed": "This feed was removed. Restore it before asking.",
   "err.conversationRunning": "This conversation is running. Wait for it or stop it.",
+  "err.conversationMissing": "Conversation not found.",
+  "err.libraryInvalid": "This file is not a valid Reedar library backup.",
   "err.tooManyConversations": "At most two conversations can run at once. Wait for one to finish.",
   "err.importRunning": "An OPML import is running.",
   "err.organizeRunning": "An organize plan is already being generated.",
@@ -606,6 +630,9 @@ const ja: Record<MessageKey, string> = {
   "ai.appleLocal": "オンデバイス",
   "ai.copyConversation": "会話をMarkdownでコピー",
   "ai.copied": "コピーしました",
+  "ai.deleteConversation": "会話を削除",
+  "ai.deleteConfirm": "この会話を削除しますか？記事はライブラリに残ります。",
+  "ai.delete": "削除",
 
   "run.running": "回答中",
   "run.waiting": "確認待ち",
@@ -659,6 +686,10 @@ const ja: Record<MessageKey, string> = {
   "conn.language": "言語",
   "conn.languageEnglish": "英語",
   "conn.languageJapanese": "日本語",
+  "conn.retention": "記事の保持期間",
+  "conn.retentionDescription": "期限を超えた未読記事は更新時に削除されます。スター付き・既読・メモ付きの記事は常に保持されます。",
+  "conn.retentionForever": "無期限",
+  "conn.retentionDays": "{days}日",
 
   "activity.title": "AIの会話",
   "activity.cancelled": "回答を中止しました",
@@ -737,6 +768,20 @@ const ja: Record<MessageKey, string> = {
   "opml.counts": "登録 {imported} · スキップ {skipped} · 失敗 {failed}",
   "opml.cancelNote": "中止する前に登録が完了したフィードは保持されています。",
 
+  "library.backupTitle": "ライブラリのバックアップ",
+  "library.backupDescription": "フィード・フォルダ・記事・設定をまとめてJSONファイルに書き出すか、バックアップで現在のライブラリを置き換えます。",
+  "library.export": "ライブラリを書き出す",
+  "library.exporting": "書き出し中…",
+  "library.exportFailed": "ライブラリを書き出せませんでした。",
+  "library.fileLabel": "復元するライブラリファイル",
+  "library.fileTooLarge": "ライブラリファイルは32MB以下にしてください。",
+  "library.readFailed": "ファイルを読み込めませんでした。",
+  "library.invalidFile": "Reedarのライブラリバックアップではありません。",
+  "library.restoreSummary": "このバックアップにはフィード{feeds}件・フォルダ{folders}件・記事{articles}件が含まれています。現在のライブラリは置き換えられます。",
+  "library.restoreApply": "ライブラリを置き換える",
+  "library.restoreFailed": "ライブラリを復元できませんでした。",
+  "library.restored": "ライブラリを復元しました。",
+
   "opml.result.imported": "登録",
   "opml.result.skipped": "スキップ",
   "opml.result.failed": "失敗",
@@ -760,6 +805,8 @@ const ja: Record<MessageKey, string> = {
   "err.folderNameLong": "フォルダ名を60文字以内にしてください。",
   "err.removedFeed": "削除済みのフィードです。復元してから質問してください。",
   "err.conversationRunning": "この会話は実行中です。完了を待つか停止してください。",
+  "err.conversationMissing": "会話が見つかりません。",
+  "err.libraryInvalid": "このファイルは有効なReedarライブラリバックアップではありません。",
   "err.tooManyConversations": "同時に実行できる会話は2件です。完了を待ってください。",
   "err.importRunning": "OPMLの読み込みは実行中です。",
   "err.organizeRunning": "整理案の生成は実行中です。",
