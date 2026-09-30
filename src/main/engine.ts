@@ -468,19 +468,20 @@ export class Engine {
     // perArticle budgets the JSON-serialized block, so escaping overhead can't push the final prompt past the cap and silently drop tail articles.
     const blockFor = (article: (typeof picked)[number]) => {
       const text = article.readerText ?? article.text;
-      // The body floor is the smaller of 500 chars and the actual text, and the title gets whatever the floor leaves; short bodies hand their room to the title.
       const floor = Math.min(500, text.length);
-      const title = article.title.slice(0, Math.max(0, perArticle - floor - article.url.length - 10));
-      const header = `## ${title}\n${article.url}\n\n`;
-      let block = header + text.slice(0, perArticle);
-      while (JSON.stringify(block).length > perArticle && block.length > floor + header.length) {
-        block = header + block.slice(header.length, Math.max(floor + header.length, Math.floor(block.length * perArticle / JSON.stringify(block).length) - 1));
+      const floorBody = text.slice(0, floor);
+      // Budget by serialized size: escape-heavy titles cost ~2x after JSON.stringify, so measure rather than assume.
+      const size = (value: string) => JSON.stringify(value).length;
+      const headerFor = (title: string) => `## ${title}\n${article.url}\n\n`;
+      let title = article.title;
+      while (title && size(headerFor(title) + floorBody) > perArticle) title = title.slice(0, Math.floor(title.length / 2));
+      let header = headerFor(title);
+      if (size(header + floorBody) > perArticle) header = `## ${title}\n\n`;
+      let body = text.slice(0, perArticle);
+      while (body.length > floor && size(header + body) > perArticle) {
+        body = body.slice(0, Math.max(floor, Math.floor(body.length * perArticle / size(header + body)) - 1));
       }
-      // Last resort for pathological URLs: shrink the serialized block itself, never below `floor` chars.
-      while (JSON.stringify(block).length > perArticle && block.length > floor) {
-        block = block.slice(0, Math.max(floor, Math.floor(block.length * perArticle / JSON.stringify(block).length) - 1));
-      }
-      return block;
+      return header + body;
     };
     const source = picked.map(blockFor).join("\n\n");
     if (picked.filter((article) => (article.readerText ?? article.text).trim()).length < 2) {

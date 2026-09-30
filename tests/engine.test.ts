@@ -503,6 +503,18 @@ describe("reading workflow", () => {
     expect(source).toContain(`body${19} `);
     await engine.close();
   });
+  test("digest shrinks an escape-heavy title instead of dropping the body", async () => {
+    let source = "";
+    const { engine, store, article } = await setup("digest-quotes", async (_agent, conversation) => { source = conversation.source.text; });
+    const quoted = { ...article, id: "quoted", title: "\"".repeat(14_000), text: "key finding" };
+    const short = { ...article, id: "short", title: "Short", text: "ok" };
+    store.state.articles.push(quoted, short);
+    await engine.dispatch({ type: "digest.run", articleIds: ["quoted", "short"], agent: "codex" });
+    await engine.settle();
+    expect(source).toContain("key finding");
+    expect(source).toContain(quoted.url);
+    await engine.close();
+  });
   test("the apple model setting persists and an agent notice lands on the assistant message", async () => {
     const { engine, store, article, path } = await setup("apple-model", async (_agent, _conversation, _q, _cwd, _signal, emit) => {
       emit({ type: "notice", text: "cloud answer" });
