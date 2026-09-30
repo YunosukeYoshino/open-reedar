@@ -482,6 +482,16 @@ describe("reading workflow", () => {
     expect(engine.snapshot.digest).toMatchObject({ status: "completed", notice: "cloud" });
     await engine.close();
   });
+  test("digest keeps every selected article in the prompt when text is newline-heavy", async () => {
+    let source = "";
+    const { engine, store, article } = await setup("digest-escape", async (_agent, conversation) => { source = conversation.source.text; });
+    const articles = Array.from({ length: 20 }, (_, i) => ({ ...article, id: `a${i}`, title: `A${i}`, text: "line\n".repeat(3000) }));
+    store.state.articles.push(...articles);
+    await engine.dispatch({ type: "digest.run", articleIds: articles.map((item) => item.id), agent: "apple" });
+    await engine.settle();
+    for (let i = 0; i < 20; i++) expect(source).toContain(`## A${i}\n`);
+    await engine.close();
+  });
   test("the apple model setting persists and an agent notice lands on the assistant message", async () => {
     const { engine, store, article, path } = await setup("apple-model", async (_agent, _conversation, _q, _cwd, _signal, emit) => {
       emit({ type: "notice", text: "cloud answer" });

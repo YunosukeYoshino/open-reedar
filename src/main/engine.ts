@@ -324,17 +324,21 @@ export class Engine {
     this.changed();
     const done = (async () => {
       let text = "";
+      let notice: string | undefined;
       try {
         await this.dependencies.organize(agent, prompt, this.runnerDirectory, controller.signal, (event) => {
           if (controller.signal.aborted) return;
           if (event.type === "delta") text = event.text;
-          else if (event.type === "notice" && this.organize) this.organize.notice = event.text;
+          else if (event.type === "notice") {
+            notice = event.text;
+            if (this.organize) { this.organize.notice = notice; this.changed(); }
+          }
         }, this.store.state.language, this.store.state.appleModel);
         if (controller.signal.aborted) return;
-        this.organize = { scope, agent, status: "completed", startedAt, plan: this.organizePlan(scope, text) };
+        this.organize = { scope, agent, status: "completed", startedAt, plan: this.organizePlan(scope, text), ...(notice ? { notice } : {}) };
       } catch (error) {
         this.organize = controller.signal.aborted ? null
-          : { scope, agent, status: "failed", startedAt, detail: agentError(error, this.store.state.language) };
+          : { scope, agent, status: "failed", startedAt, detail: agentError(error, this.store.state.language), ...(notice ? { notice } : {}) };
       } finally { this.organizeRun = undefined; this.changed(); }
     })();
     this.organizeRun = { controller, done };
@@ -461,7 +465,17 @@ export class Engine {
     // ponytail: articles share a text budget sized to the agent so the JSON prompt stays under its cap and every selected article is included; upgrade path is chunking with a map pass.
     // Apple digests run on Private Cloud Compute by default: the ~32K-token tier leaves ~10k chars for the instructions and JSON envelope.
     const perArticle = Math.min(15_000, Math.floor((agent === "apple" ? fmPccPromptLimit - 10_000 : 150_000) / Math.max(picked.length, 1)));
-    const source = picked.map((article) => `## ${article.title}\n${article.url}\n\n${(article.readerText ?? article.text).slice(0, perArticle)}`).join("\n\n");
+    // perArticle budgets the JSON-serialized block, so escaping overhead can't push the final prompt past the cap and silently drop tail articles.
+    const blockFor = (article: (typeof picked)[number]) => {
+      const header = `## ${article.title}\n${article.url}\n\n`;
+      const text = article.readerText ?? article.text;
+      let slice = text.slice(0, perArticle);
+      while (slice && JSON.stringify(header + slice).length > perArticle) {
+        slice = slice.slice(0, Math.max(0, Math.floor(slice.length * perArticle / JSON.stringify(header + slice).length) - 1));
+      }
+      return header + slice;
+    };
+    const source = picked.map(blockFor).join("\n\n");
     if (picked.filter((article) => (article.readerText ?? article.text).trim()).length < 2) {
       this.digest = { status: "failed", agent, text: "", titles: picked.map((article) => article.title), detail: this.t("err.digestEmpty") };
       this.changed();
