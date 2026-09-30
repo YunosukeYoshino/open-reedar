@@ -141,6 +141,31 @@ describe("articles database", () => {
     store.close();
   });
 
+  test("backup-restored articles do not resurrect deleted rows on database recovery", async () => {
+    const dir = join(directory, "no-resurrect");
+    await mkdir(dir, { recursive: true });
+    const path = join(dir, "reader.json");
+    const second: Article = { ...article, id: "article-b", title: "Deleted later" };
+    const third: Article = { ...article, id: "article-c", title: "Added during outage" };
+    await writeFile(path, JSON.stringify(library([article, second])));
+    const migrated = await Store.open(path);
+    migrated.state.articles = [article];
+    await migrated.save();
+    migrated.close();
+    // DB temporarily unavailable (missing parent directory): the library is restored from .bak in memory.
+    const degraded = await Store.open(path, { dbPath: join(dir, "missing", "articles.db") });
+    expect(degraded.searchAvailable).toBe(false);
+    expect(degraded.state.articles.map((item) => item.id).sort()).toEqual(["article", "article-b"]);
+    degraded.state.articles.push(third);
+    await degraded.save();
+    const persisted = stateSchema.parse(JSON.parse(await readFile(path, "utf8")));
+    expect(persisted.articles.map((item) => item.id)).toEqual(["article-c"]);
+    degraded.close();
+    const recovered = await Store.open(path);
+    expect(recovered.state.articles.map((item) => item.id).sort()).toEqual(["article", "article-c"]);
+    recovered.close();
+  });
+
   test("an open search refreshes when new matching articles arrive", async () => {
     const dir = join(directory, "search-refresh");
     const store = await Store.open(join(dir, "reader.json"));

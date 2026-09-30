@@ -14,6 +14,7 @@ export class Store {
   private writing: Promise<void> = Promise.resolve();
   private db: ArticlesDb | null;
   private revisions = new Map<string, string>();
+  private restoredFromBackup = new Set<string>();
 
   private constructor(private readonly path: string, state: ReaderState, db: ArticlesDb | null) {
     this.state = state;
@@ -42,7 +43,11 @@ export class Store {
       // A migrated reader.json carries no articles; when the DB cannot open, fall back to the pre-migration backup so the library is not empty.
       try {
         const backup = stateSchema.parse(JSON.parse(await readFile(`${path}.bak`, "utf8")));
-        if (backup.articles.length) state.articles = backup.articles;
+        if (backup.articles.length) {
+          state.articles = backup.articles;
+          // Backup copies are already in (or were deleted from) the database; keeping them out of reader.json stops recovery from re-importing them.
+          for (const article of backup.articles) store.restoredFromBackup.add(article.id);
+        }
       } catch { /* no usable backup; start empty */ }
     }
     if (db) {
@@ -78,7 +83,8 @@ export class Store {
 
   save() {
     if (this.db) this.syncArticles();
-    const data = JSON.stringify(stateSchema.parse(this.db ? { ...this.state, articles: [] } : this.state));
+    const articles = this.db ? [] : this.state.articles.filter((article) => !this.restoredFromBackup.has(article.id));
+    const data = JSON.stringify(stateSchema.parse({ ...this.state, articles }));
     const write = this.writing.catch(() => {}).then(async () => {
       const temporary = `${this.path}.pending`;
       await writeFile(temporary, data, { mode: 0o600 });
