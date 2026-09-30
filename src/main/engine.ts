@@ -35,7 +35,6 @@ export class Engine {
   private markReadUndoIds: string[] = [];
   private feedDiscovery: { url: string; candidates: { url: string; title: string }[] } | null = null;
   private feedDiscoveryToken = 0;
-  private libraryGeneration = 0;
   private digest: DigestJob | null = null;
   private digestJob: { controller: AbortController; done: Promise<void> } | undefined;
   private listeners = new Set<(update: Update) => void>();
@@ -196,7 +195,7 @@ export class Engine {
       case "opml.previewClear": this.opmlPreview = null; this.changed(); return;
       case "opml.stop": this.importJob?.controller.abort(); return;
       case "library.export": return this.exportLibrary();
-      case "library.import": this.importLibrary(action.json); break;
+      case "library.import": return this.importLibrary(action.json);
       case "organize.propose": return this.proposeOrganize(action.agent, action.scope);
       case "organize.apply": this.applyOrganize(action.moves, action.assignments); break;
       case "organize.cancel": this.organizeRun?.controller.abort(); this.organize = null; this.changed(); return;
@@ -269,7 +268,6 @@ export class Engine {
   private async importOpml(xml: string, urls?: string[], folders?: Record<string, string>) {
     if (this.importJob) throw new Error(this.t("err.importRunning"));
     const selected = urls ? new Set(urls) : null;
-    const generation = this.libraryGeneration;
     const entries = (await parseOpml(xml, this.store.state.language)).map((entry) => ({ ...entry, folderName: folders?.[entry.url] ?? entry.folderName }))
       .filter((entry) => !selected || selected.has(entry.url));
     if (this.importJob) throw new Error(this.t("err.importRunning"));
@@ -306,7 +304,6 @@ export class Engine {
                 if (!folder) { this.store.saveFolder(null, entry.folderName); folder = this.store.state.folders.find((folder) => folder.name === entry.folderName); }
                 folderId = folder?.id ?? null;
               }
-              if (generation !== this.libraryGeneration) return;
               this.store.mergeFeed({ ...result.feed, title: entry.title || result.feed.title, folderId, removedAt: undefined, etag: result.etag ?? result.feed.etag, lastModified: result.lastModified ?? result.feed.lastModified }, result.articles);
               await this.store.save();
               report.results.push({ ...item, status: "imported", detail: existing ? this.t("err.restored") : this.t("err.imported") });
@@ -319,7 +316,7 @@ export class Engine {
       } catch {
         report.status = "failed";
         report.error = this.t("err.importFailed");
-      } finally { this.importJob = undefined; this.opmlPreview = null; this.changed(); }
+      } finally { this.importJob = undefined; this.opmlPreview = null; if (this.pruneOldArticles()) await this.store.save(); this.changed(); }
     })();
     this.importJob = { controller, done };
     void done.catch(() => {});
@@ -433,7 +430,6 @@ export class Engine {
     this.refreshing = true;
     this.changed();
     const now = new Date().toISOString();
-    const generation = this.libraryGeneration;
     try {
       const feeds = this.store.state.feeds.filter((feed) => !feed.removedAt && (!automatic || !feed.backoffUntil || feed.backoffUntil <= now));
       for (let offset = 0; offset < feeds.length; offset += 4) {
@@ -441,7 +437,6 @@ export class Engine {
           const current = () => this.store.state.feeds.find((item) => item.id === feed.id);
           try {
             const result = await this.dependencies.fetchFeed(feed.url, feed.folderId, undefined, this.store.state.language, { etag: feed.etag, lastModified: feed.lastModified });
-            if (generation !== this.libraryGeneration) return;
             const merged = current();
             if (!merged || merged.removedAt) return;
             if (result.notModified) {
@@ -530,18 +525,13 @@ export class Engine {
     };
   }
 
-  private importLibrary(raw: string) {
+  private async importLibrary(raw: string) {
     let backup: LibraryExport;
     try { backup = libraryExportSchema.parse(JSON.parse(raw)); }
     catch { throw new LocalizedError(this.t("err.libraryInvalid")); }
-    // Backup HTML is untrusted input: re-sanitize through the extraction pipeline before it renders.
-    for (const article of backup.articles) {
-      if (article.readerHtml) {
-        const clean = cleanArticle(article.readerHtml, article.url);
-        article.readerHtml = clean.html;
-        article.readerText = clean.text;
-      }
-    }
+    // Writers that merge into state (feed refresh, OPML import) must finish first or their late results would land on top of the restored library. New ones can be dispatched while waiting, so loop until none remain; the replacement below then runs without awaiting.
+    this.importJob?.controller.abort();
+    while (this.importJob || this.refreshJob) await Promise.allSettled([this.importJob?.done, this.refreshJob]);
     const articleIds = new Set(backup.articles.map((article) => article.id));
     for (const conversation of this.store.state.conversations) {
       if (!articleIds.has(conversation.articleId)) this.jobs.get(conversation.id)?.controller.abort();
@@ -549,7 +539,8 @@ export class Engine {
     const state = this.store.state;
     state.folders = backup.folders;
     state.feeds = backup.feeds;
-    state.articles = backup.articles;
+    // Backup HTML bypasses the fetch-time sanitizer, so it is cleaned again here before it reaches dangerouslySetInnerHTML.
+    state.articles = backup.articles.map((article) => ({ ...article, html: cleanArticle(article.html, article.url).html, ...(article.readerHtml === undefined ? {} : { readerHtml: cleanArticle(article.readerHtml, article.url).html }) }));
     state.conversations = state.conversations.filter((conversation) => articleIds.has(conversation.articleId));
     const settings = backup.settings;
     const languageChanged = settings.language !== undefined && settings.language !== state.language;
@@ -559,9 +550,10 @@ export class Engine {
     if (settings.defaultAgent !== undefined) state.defaultAgent = settings.defaultAgent;
     if (settings.articlesRetentionDays !== undefined) state.articlesRetentionDays = settings.articlesRetentionDays;
     this.markReadUndoIds = [];
-    this.libraryGeneration++;
     this.pruneOldArticles();
     if (languageChanged) void this.refreshConnections();
+    await this.store.save();
+    this.changed();
   }
 
   private pruneOldArticles() {

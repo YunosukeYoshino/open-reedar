@@ -26,7 +26,7 @@ function matchesToken(received: string | undefined, token: string) {
   return input.length === expected.length && timingSafeEqual(input, expected);
 }
 
-export async function requestBody(request: AsyncIterable<unknown>, maximumBytes = 32_000) {
+export async function requestText(request: AsyncIterable<unknown>, maximumBytes = 32_000) {
   const chunks: Buffer[] = [];
   let length = 0;
   for await (const chunk of request) {
@@ -35,7 +35,11 @@ export async function requestBody(request: AsyncIterable<unknown>, maximumBytes 
     if (length > maximumBytes) throw new Error(t("en", "err.inputTooLarge"));
     chunks.push(chunk);
   }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+export async function requestBody(request: AsyncIterable<unknown>, maximumBytes = 32_000) {
+  return JSON.parse(await requestText(request, maximumBytes)) as unknown;
 }
 
 // Bulk-import actions carry whole files inside the action body. The "type" field leads the
