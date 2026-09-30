@@ -22,6 +22,8 @@ function mulberry32(seed: number) {
   };
 }
 const random = mulberry32(0x5eed5eed);
+// Deterministic base instant — the seed alone must fix every timestamp or the fixture is not reproducible.
+const BASE = Date.parse("2026-09-01T00:00:00Z");
 const int = (low: number, high: number) => low + Math.floor(random() * (high - low + 1));
 const pick = <T>(items: readonly T[]): T => items[int(0, items.length - 1)]!;
 let nextId = 0;
@@ -51,12 +53,12 @@ function makeFeed(index: number): Feed {
   const feed: Feed = {
     id: hexId(), url, title: `${pick(WORDS)} ${pick(WORDS)} daily`, siteUrl: `https://feed-${index}.example.com`,
     folderId: random() < 0.8 ? pick(folders).id : null,
-    updatedAt: new Date(Date.now() - int(0, 86_400_000)).toISOString(), error: null,
+    updatedAt: new Date(BASE - int(0, 86_400_000)).toISOString(), error: null,
   };
   if (random() < 0.6) feed.etag = `W/"v${int(1, 9999)}"`;
-  if (random() < 0.6) feed.lastModified = new Date(Date.now() - int(0, 3_600_000)).toISOString();
+  if (random() < 0.6) feed.lastModified = new Date(BASE - int(0, 3_600_000)).toISOString();
   if (random() < 0.15) feed.failures = int(1, 4);
-  if (feed.failures) feed.backoffUntil = new Date(Date.now() + int(0, 3_600_000)).toISOString();
+  if (feed.failures) feed.backoffUntil = new Date(BASE + int(0, 3_600_000)).toISOString();
   return feed;
 }
 
@@ -83,8 +85,11 @@ function generate(size: number): ReaderState {
   const weights = feeds.map(() => random() * random() + 0.02);
   const total = weights.reduce((sum, weight) => sum + weight, 0);
   const cumulative = weights.map((_, index) => weights.slice(0, index + 1).reduce((sum, weight) => sum + weight, 0) / total);
-  const pickFeed = () => feeds[cumulative.findIndex((mark) => random() <= mark)] ?? feeds[0]!;
-  const now = Date.now();
+  const pickFeed = () => {
+    const roll = random();
+    return feeds[cumulative.findIndex((mark) => roll <= mark)] ?? feeds[0]!;
+  };
+  const now = BASE;
   const articles = Array.from({ length: size }, () => makeArticle(pickFeed().id, now))
     .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
   const conversations: Conversation[] = articles.slice(0, 4).map((article) => ({
@@ -140,23 +145,29 @@ try {
   for (const size of SIZES) {
     console.error(`benchmarking ${size.toLocaleString()} articles...`);
     const path = join(directory, `reader-${size}.json`);
-    const state = stateSchema.parse(generate(size));
-    const started = performance.now();
-    const json = JSON.stringify(state);
-    await writeFile(path, json, { mode: 0o600 });
-    console.error(`  generated + wrote fixture in ${Math.round(performance.now() - started)}ms`);
-    fileSizes.push(json.length / 1_048_576);
-
-    const text = await measure("readFile", 2, () => readFile(path, "utf8"));
-    const parsed = await measure("JSON.parse", 2, () => JSON.parse(text));
-    await measure("zod validate", 2, () => stateSchema.parse(parsed));
+    {
+      const state = stateSchema.parse(generate(size));
+      const started = performance.now();
+      const json = JSON.stringify(state);
+      await writeFile(path, json, { mode: 0o600 });
+      console.error(`  generated + wrote fixture in ${Math.round(performance.now() - started)}ms`);
+      fileSizes.push(json.length / 1_048_576);
+    }
+    // Fixture objects are out of scope before measuring so generation heap does not inflate phase peaks.
+    Bun.gc(true);
+    {
+      const text = await measure("readFile", 2, () => readFile(path, "utf8"));
+      const parsed = await measure("JSON.parse", 2, () => JSON.parse(text));
+      await measure("zod validate", 2, () => stateSchema.parse(parsed));
+    }
+    Bun.gc(true);
     const store = await measure("Store.open", 1, () => Store.open(path));
     await measure("store.save", 2, () => store.save());
 
     const engine = new Engine(store, join(directory, `runner-${size}`));
     await measure("snapshot", 3, () => JSON.stringify({ type: "snapshot", snapshot: engine.snapshot }));
 
-    const refresh = store.state.feeds.map((feed) => [feed, refreshedBatch(store, feed, Date.now())] as const);
+    const refresh = store.state.feeds.map((feed) => [feed, refreshedBatch(store, feed, BASE)] as const);
     const savedArticles = store.state.articles;
     await measure("mergeFeed x1", 3, (rep) => {
       if (rep) store.state.articles = savedArticles;
