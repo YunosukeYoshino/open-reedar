@@ -82,7 +82,9 @@ export function OpmlDialog({ report, preview, hasFeeds, act, perform, organize, 
     let text: string;
     try { text = new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer()); }
     catch { setLibraryError(t("library.readFailed")); return; }
-    const parsed = libraryExportSchema.safeParse(JSON.parse(text));
+    let parsed: ReturnType<typeof libraryExportSchema.safeParse>;
+    try { parsed = libraryExportSchema.safeParse(JSON.parse(text)); }
+    catch { setLibraryError(t("library.invalidFile")); return; }
     if (!parsed.success) { setLibraryError(t("library.invalidFile")); return; }
     setPendingRestore({ json: text, doc: parsed.data });
   }

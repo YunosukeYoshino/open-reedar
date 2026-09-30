@@ -38,6 +38,26 @@ export async function requestBody(request: AsyncIterable<unknown>, maximumBytes 
   return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
 }
 
+// Bulk-import actions carry whole files inside the action body. The "type" field leads the
+// payload, so the 33 MB budget applies only once the early bytes name a bulk action.
+const bulkActions = new Set(["library.import", "opml.import"]);
+async function actionBody(request: AsyncIterable<unknown>) {
+  const chunks: Buffer[] = [];
+  let length = 0;
+  let limit = 1024 * 1024;
+  for await (const chunk of request) {
+    if (!Buffer.isBuffer(chunk)) throw new Error(t("en", "err.badInput"));
+    chunks.push(chunk);
+    length += chunk.length;
+    if (limit < 33 * 1024 * 1024 && length >= 4096) {
+      const type = /"type"\s*:\s*"([^"]+)"/.exec(Buffer.concat(chunks).subarray(0, 4096).toString("utf8"))?.[1];
+      if (type !== undefined && bulkActions.has(type)) limit = 33 * 1024 * 1024;
+    }
+    if (length > limit) throw new Error(t("en", "err.inputTooLarge"));
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+}
+
 export async function startServer(options: Options) {
   const store = options.engine?.store ?? await Store.open(join(options.dataDirectory, "reader.json"));
   const engine = options.engine ?? new Engine(store, join(options.dataDirectory, "reading-workspace"));
@@ -80,7 +100,7 @@ export async function startServer(options: Options) {
     }
     if (request.method === "POST" && url.pathname === "/api/action") {
       if (request.headers.origin !== origin || !request.headers["content-type"]?.startsWith("application/json")) return json(response, 403, { error: t(store.state.language, "err.externalAction") });
-      const result = actionSchema.safeParse(await requestBody(request, 33 * 1024 * 1024));
+      const result = actionSchema.safeParse(await actionBody(request));
       if (!result.success) return json(response, 400, { error: t(store.state.language, "err.checkInput") });
       const outcome = await engine.dispatch(result.data);
       return json(response, 200, outcome === undefined ? { ok: true } : { ok: true, result: outcome });
