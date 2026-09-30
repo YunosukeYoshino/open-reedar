@@ -30,12 +30,15 @@ export function Reader({ agent, conversation, act, article, feed, aiOpen, toggle
   const shownAt = useRef(0);
   useEffect(() => {
     setWebView(!!article?.readerHtml); setFetching(false); setFetchError(null); overscroll.current = 0; shownAt.current = Date.now();
+  }, [article?.id]);
+  // The cue (~90px) is part of the scrollable height: a threshold above its size keeps it mounted once shown, so the wheel path can always reach the true bottom.
+  useEffect(() => {
     const el = scrollRef.current;
-    setAtEnd(el ? el.scrollTop + el.clientHeight >= el.scrollHeight - 24 : false);
+    setAtEnd(el ? el.scrollTop + el.clientHeight >= el.scrollHeight - 120 : false);
   }, [article?.id, webView]);
   function onScroll() {
     const el = scrollRef.current;
-    if (el) setAtEnd(el.scrollTop + el.clientHeight >= el.scrollHeight - 24);
+    if (el) setAtEnd(el.scrollTop + el.clientHeight >= el.scrollHeight - 120);
   }
   function onWheel(event: WheelEvent<HTMLDivElement>) {
     const el = scrollRef.current;
