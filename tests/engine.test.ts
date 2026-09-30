@@ -155,6 +155,73 @@ describe("reading workflow", () => {
     await engine.close();
   });
 
+  test("stopping mid-stream saves the partial answer with a partial flag", async () => {
+    let started: (() => void) | undefined;
+    const ready = new Promise<void>((resolve) => { started = resolve; });
+    const { engine, store, article, path } = await setup("partial-stop", async (_agent, _conversation, _question, _cwd, signal, emit) => {
+      emit({ type: "delta", text: "Half of the answer" });
+      started?.();
+      await new Promise<void>((resolve) => { if (signal.aborted) resolve(); else signal.addEventListener("abort", () => resolve(), { once: true }); });
+    });
+    await engine.dispatch({ type: "chat.send", articleId: article.id, agent: "codex", text: "Summarize" });
+    await ready;
+    const conversation = store.state.conversations[0];
+    if (!conversation) throw new Error("conversation missing");
+    await engine.dispatch({ type: "chat.stop", conversationId: conversation.id });
+    await engine.settle();
+    expect((await Store.open(path)).state.conversations[0]?.messages.at(-1)).toMatchObject({ text: "Half of the answer", partial: true, state: { status: "cancelled" } });
+    await engine.close();
+  });
+
+  test("a mid-stream failure keeps the partial answer alongside the error", async () => {
+    const { engine, store, article, path } = await setup("partial-fail", async (_agent, _conversation, _question, _cwd, _signal, emit) => {
+      emit({ type: "delta", text: "Almost there" });
+      throw new Error("boom");
+    });
+    await engine.dispatch({ type: "chat.send", articleId: article.id, agent: "codex", text: "Summarize" });
+    await engine.settle();
+    // toMatchObject mutates the received value on asymmetric matchers, so assert on a clone.
+    expect(structuredClone(store.state.conversations[0]?.messages.at(-1))).toMatchObject({ text: "Almost there", partial: true, state: { status: "failed", error: expect.any(String) } });
+    expect((await Store.open(path)).state.conversations[0]?.messages.at(-1)).toMatchObject({ text: "Almost there", partial: true });
+    await engine.close();
+  });
+
+  test("a failure before any output keeps only the error", async () => {
+    const { engine, store, article } = await setup("clean-fail", async () => { throw new Error("boom"); });
+    await engine.dispatch({ type: "chat.send", articleId: article.id, agent: "codex", text: "Summarize" });
+    await engine.settle();
+    const message = store.state.conversations[0]?.messages.at(-1);
+    expect(structuredClone(message)).toMatchObject({ text: "", state: { status: "failed", error: expect.any(String) } });
+    expect(message).not.toHaveProperty("partial");
+    await engine.close();
+  });
+
+  test("closing the engine mid-stream preserves the partial answer across restarts", async () => {
+    let started: (() => void) | undefined;
+    const ready = new Promise<void>((resolve) => { started = resolve; });
+    const { engine, store, article, path } = await setup("partial-quit", async (_agent, _conversation, _question, _cwd, signal, emit) => {
+      emit({ type: "delta", text: "Unfinished thought" });
+      started?.();
+      await new Promise<void>((resolve) => { if (signal.aborted) resolve(); else signal.addEventListener("abort", () => resolve(), { once: true }); });
+      throw new Error("aborted");
+    });
+    await engine.dispatch({ type: "chat.send", articleId: article.id, agent: "codex", text: "Summarize" });
+    await ready;
+    expect(store.state.conversations[0]?.messages.at(-1)).toMatchObject({ text: "Unfinished thought", state: { status: "running" } });
+    await engine.close();
+    expect((await Store.open(path)).state.conversations[0]?.messages.at(-1)).toMatchObject({ text: "Unfinished thought", partial: true, state: { status: "cancelled" } });
+  });
+
+  test("a run interrupted by a hard exit is recovered as a partial answer", async () => {
+    const path = join(directory, "partial-crash", "state.json");
+    const store = await Store.open(path);
+    const result = await parseFeed(xml, "https://example.com/rss", null);
+    store.mergeFeed(result.feed, result.articles);
+    store.state.conversations.push({ id: "crashed", articleId: result.articles[0]!.id, agent: "codex", source: { title: "T", url: "https://example.com/a", text: "body", capturedAt: new Date().toISOString() }, messages: [{ id: "m", role: "assistant", text: "Streamed so far", createdAt: new Date().toISOString(), state: { status: "running" } }] });
+    await store.save();
+    expect((await Store.open(path)).state.conversations[0]?.messages.at(-1)).toMatchObject({ text: "Streamed so far", partial: true, state: { status: "failed" } });
+  });
+
   test("authentication is a waiting state, not a fake completed response", async () => {
     const { engine, store, article } = await setup("auth", async () => { throw new AuthenticationRequired("ログインしてください"); });
     await engine.dispatch({ type: "chat.send", articleId: article.id, agent: "claude", text: "Summarize" });
