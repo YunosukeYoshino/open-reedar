@@ -20,7 +20,7 @@ const article: Article = {
   publishedAt: "2026-09-10T00:00:00.000Z", receivedAt: "2026-09-11T00:00:00.000Z", html: "<p>Original</p>",
   text: "Original", excerpt: "Original", imageUrl: null, read: false, starred: false,
 };
-const library = (articles: Article[]): ReaderState => ({ version: 1, folders: [], feeds: [feed], articles, conversations: [], language: "en", refreshMinutes: 30, fontSize: "m" });
+const library = (articles: Article[]): ReaderState => stateSchema.parse({ version: 1, folders: [], feeds: [feed], articles, conversations: [], language: "en", refreshMinutes: 30, fontSize: "m" });
 const connect: typeof connection = async (agent) => ({ agent, installed: true, status: "ready", detail: "fixture" });
 
 describe("articles database", () => {

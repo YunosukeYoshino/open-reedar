@@ -41,10 +41,11 @@ export function cleanArticle(html: string, base: string) {
     transformTags: {
       a: (_name, attributes) => ({ tagName: "a", attribs: { href: safeLink(attributes.href, base), target: "_blank", rel: "noopener noreferrer" } }),
       img: (_name, attributes) => {
-        const src = safeLink(attributes.src, base);
+        const proxied = attributes.src?.startsWith("/image?url=");
+        const src = proxied ? attributes.src : safeLink(attributes.src, base);
         if (src && imageUrl === null) imageUrl = src;
         const attribs: Record<string, string> = {};
-        if (src) Object.assign(attribs, { src: `/image?url=${encodeURIComponent(src)}`, alt: attributes.alt ?? "", loading: "lazy", decoding: "async" });
+        if (src) Object.assign(attribs, { src: proxied ? src : `/image?url=${encodeURIComponent(src)}`, alt: attributes.alt ?? "", loading: "lazy", decoding: "async" });
         return { tagName: "img", attribs };
       },
     },

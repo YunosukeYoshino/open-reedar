@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { WheelEvent } from "react";
 import { ArrowDown, ArrowUp, BookOpen, Bot, Circle, ExternalLink, Loader2, Star, X } from "lucide-react";
 import type { Action, Agent, Article, Conversation, Feed, ReaderState } from "../shared/schema";
@@ -6,7 +6,7 @@ import { ArticleContent } from "./ArticleContent";
 import { domain, readingMinutes } from "./format";
 import { useFormatters, useT } from "./i18n";
 
-type Props = { agent: Agent; conversation: Conversation | undefined; act: (action: Action) => Promise<void>; article: Article | undefined; feed: Feed | undefined; aiOpen: boolean; toggleAi: () => void; perform: (action: Action) => void; fontSize: ReaderState["fontSize"]; previous: () => void; next: () => void; hasPrevious: boolean; hasNext: boolean; nextTitle: string | undefined };
+type Props = { agent: Agent; conversation: Conversation | undefined; act: (action: Action) => Promise<unknown>; article: Article | undefined; feed: Feed | undefined; aiOpen: boolean; toggleAi: () => void; perform: (action: Action) => void; fontSize: ReaderState["fontSize"]; previous: () => void; next: () => void; hasPrevious: boolean; hasNext: boolean; nextTitle: string | undefined };
 
 function ArticleNotes({ article, perform }: { article: Article; perform: (action: Action) => void }) {
   const t = useT();
@@ -30,13 +30,17 @@ export function Reader({ agent, conversation, act, article, feed, aiOpen, toggle
   const shownAt = useRef(0);
   useEffect(() => {
     setWebView(!!article?.readerHtml); setFetching(false); setFetchError(null); overscroll.current = 0; shownAt.current = Date.now();
+  }, [article?.id]);
+  const onScroll = useCallback(() => {
     const el = scrollRef.current;
-    setAtEnd(el ? el.scrollTop + el.clientHeight >= el.scrollHeight - 24 : false);
-  }, [article?.id, webView]);
-  function onScroll() {
-    const el = scrollRef.current;
-    if (el) setAtEnd(el.scrollTop + el.clientHeight >= el.scrollHeight - 24);
-  }
+    if (el) {
+      const cueHeight = el.querySelector(".next-cue")?.getBoundingClientRect().height ?? 0;
+      setAtEnd(el.scrollTop + el.clientHeight >= el.scrollHeight - cueHeight - 24);
+    }
+  }, []);
+  useEffect(() => {
+    onScroll();
+  }, [article?.id, webView, onScroll]);
   function onWheel(event: WheelEvent<HTMLDivElement>) {
     const el = scrollRef.current;
     const bottom = el ? el.scrollTop + el.clientHeight >= el.scrollHeight - 4 : false;
