@@ -28,6 +28,7 @@ export class Store {
       for (const message of conversation.messages) {
         if (message.role === "assistant" && ["running", "waiting"].includes(message.state.status)) {
           message.state = { status: "failed", error: t(state.language, "err.interrupted") };
+          if (message.text.trim()) message.partial = true;
         }
       }
     }

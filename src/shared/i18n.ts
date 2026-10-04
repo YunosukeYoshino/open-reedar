@@ -153,6 +153,7 @@ const en = {
   "ai.appleLocal": "On-device",
   "ai.copyConversation": "Copy conversation as Markdown",
   "ai.copied": "Copied",
+  "ai.partialAnswer": "Partial answer",
 
   // Run states
   "run.running": "Answering",
@@ -609,6 +610,7 @@ const ja: Record<MessageKey, string> = {
   "ai.appleLocal": "オンデバイス",
   "ai.copyConversation": "会話をMarkdownでコピー",
   "ai.copied": "コピーしました",
+  "ai.partialAnswer": "部分的な回答",
 
   "run.running": "回答中",
   "run.waiting": "確認待ち",

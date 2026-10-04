@@ -526,6 +526,10 @@ export class Engine {
     const notify = () => {
       if (!notifyTimer) notifyTimer = setTimeout(() => { notifyTimer = undefined; this.emit({ type: "conversation", conversation: current }); }, 60);
     };
+    let checkpointTimer: ReturnType<typeof setTimeout> | undefined;
+    const checkpoint = () => {
+      if (!checkpointTimer) checkpointTimer = setTimeout(() => { checkpointTimer = undefined; void this.store.save().catch(() => {}); }, 1000);
+    };
     const done = (async () => {
       try {
         await this.store.save();
@@ -557,6 +561,7 @@ export class Engine {
           if (event.type === "delta") { message.text = event.text; message.state = { status: "running" }; }
           else message.state = { status: "waiting", reason: event.reason };
           notify();
+          checkpoint();
         }, this.store.state.language);
         if (!controller.signal.aborted) message.state = { status: "completed" };
       } catch (error) {
@@ -565,6 +570,8 @@ export class Engine {
           : { status: "failed", error: agentError(error, this.store.state.language) };
       } finally {
         if (notifyTimer) clearTimeout(notifyTimer);
+        if (checkpointTimer) clearTimeout(checkpointTimer);
+        if (message.text.trim() && message.state.status !== "completed") message.partial = true;
         try { await this.store.save(); }
         finally { this.jobs.delete(current.id); this.changed(); }
       }
@@ -578,7 +585,10 @@ export class Engine {
     this.jobs.get(conversationId)?.controller.abort();
     const conversation = this.store.state.conversations.find((item) => item.id === conversationId);
     const last = conversation?.messages.at(-1);
-    if (last?.role === "assistant" && ["running", "waiting"].includes(last.state.status)) last.state = { status: "cancelled" };
+    if (last?.role === "assistant" && ["running", "waiting"].includes(last.state.status)) {
+      last.state = { status: "cancelled" };
+      if (last.text.trim()) last.partial = true;
+    }
     await this.store.save();
     this.changed();
   }
