@@ -5,7 +5,10 @@ import { fetchPublic } from "./network";
 import { t } from "../shared/i18n";
 import type { Language } from "../shared/schema";
 
-function extractArticle(html: string, url: string, lang: Language = "en") {
+// Static extracts below this length are treated as JS-rendered pages and retried through the offscreen renderer.
+export const THIN_ARTICLE_TEXT_LENGTH = 500;
+
+export function extractArticle(html: string, url: string, lang: Language = "en") {
   // This DOM parser does not run scripts or load page resources.
   const document = new DOMParser().parseFromString(html, "text/html");
   Object.defineProperty(document, "documentURI", { value: url });

@@ -4,13 +4,14 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join, resolve, sep } from "node:path";
 import { actionSchema } from "../shared/schema";
+import type { loadArticleText } from "./article-text";
 import { Engine } from "./engine";
 import { fetchPublic } from "./network";
 import { serializeOpml } from "./opml";
 import { Store } from "./store";
 import { t } from "../shared/i18n";
 
-type Options = { dataDirectory: string; staticDirectory: string; port?: number; engine?: Engine };
+type Options = { dataDirectory: string; staticDirectory: string; port?: number; engine?: Engine; renderArticleText?: typeof loadArticleText };
 const csp = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 const contentTypes: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".woff2": "font/woff2" };
 
@@ -64,7 +65,7 @@ async function actionBody(request: AsyncIterable<unknown>) {
 
 export async function startServer(options: Options) {
   const store = options.engine?.store ?? await Store.open(join(options.dataDirectory, "reader.json"));
-  const engine = options.engine ?? new Engine(store, join(options.dataDirectory, "reading-workspace"));
+  const engine = options.engine ?? new Engine(store, join(options.dataDirectory, "reading-workspace"), { renderArticleText: options.renderArticleText });
   const token = randomBytes(32).toString("hex");
   let origin = "";
   const streams = new Set<ServerResponse>();
