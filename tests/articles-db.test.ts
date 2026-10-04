@@ -2,6 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import type { connection } from "../src/main/agents/reader";
 import { ArticlesDb } from "../src/main/articles-db";
 import { Engine } from "../src/main/engine";
@@ -23,6 +24,21 @@ const library = (articles: Article[]): ReaderState => ({ version: 1, folders: []
 const connect: typeof connection = async (agent) => ({ agent, installed: true, status: "ready", detail: "fixture" });
 
 describe("articles database", () => {
+  test("invalid article rows use the JSON backup instead of preventing launch", async () => {
+    const dir = join(directory, "invalid-row");
+    await mkdir(dir, { recursive: true });
+    const path = join(dir, "reader.json");
+    await writeFile(path, JSON.stringify(library([article])));
+    const migrated = await Store.open(path);
+    migrated.close();
+    const db = new DatabaseSync(join(dir, "articles.db"));
+    db.prepare("UPDATE articles SET highlights = ?").run("{invalid");
+    db.close();
+    const degraded = await Store.open(path);
+    expect(degraded.searchAvailable).toBe(false);
+    expect(degraded.article(article.id).title).toBe(article.title);
+    degraded.close();
+  });
   test("first boot imports reader.json articles into the database and keeps a .bak of the original", async () => {
     const dir = join(directory, "migrate");
     await mkdir(dir, { recursive: true });
@@ -156,13 +172,23 @@ describe("articles database", () => {
     const degraded = await Store.open(path, { dbPath: join(dir, "missing", "articles.db") });
     expect(degraded.searchAvailable).toBe(false);
     expect(degraded.state.articles.map((item) => item.id).sort()).toEqual(["article", "article-b"]);
+    degraded.article("article").note = "Edited during outage";
+    degraded.article("article").read = true;
+    degraded.article("article-b").note = "Must not resurrect";
     degraded.state.articles.push(third);
     await degraded.save();
     const persisted = stateSchema.parse(JSON.parse(await readFile(path, "utf8")));
     expect(persisted.articles.map((item) => item.id)).toEqual(["article-c"]);
     degraded.close();
+    const restarted = await Store.open(path, { dbPath: join(dir, "missing", "articles.db") });
+    expect(restarted.state.articles.map((item) => item.id).sort()).toEqual(["article", "article-b", "article-c"]);
+    expect(restarted.article("article")).toMatchObject({ note: "Edited during outage", read: true });
+    restarted.state.articles = restarted.state.articles.filter((item) => item.id !== third.id);
+    await restarted.save();
+    restarted.close();
     const recovered = await Store.open(path);
-    expect(recovered.state.articles.map((item) => item.id).sort()).toEqual(["article", "article-c"]);
+    expect(recovered.state.articles.map((item) => item.id)).toEqual(["article"]);
+    expect(recovered.article("article")).toMatchObject({ note: "Edited during outage", read: true });
     recovered.close();
   });
 
@@ -178,5 +204,24 @@ describe("articles database", () => {
     await engine.dispatch({ type: "article.read", id: article.id, read: true });
     expect(engine.snapshot.search?.results.map((match) => match.id)).toEqual(["article"]);
     await engine.close();
+  });
+
+  test("deletions during a database outage persist through restart and recovery", async () => {
+    const dir = join(directory, "outage-delete");
+    await mkdir(dir, { recursive: true });
+    const path = join(dir, "reader.json");
+    const second = { ...article, id: "second" };
+    await writeFile(path, JSON.stringify(library([article, second])));
+    const migrated = await Store.open(path); migrated.close();
+    const degraded = await Store.open(path, { dbPath: join(dir, "missing", "articles.db") });
+    degraded.state.articles = [second];
+    await degraded.save(); degraded.close();
+    const restarted = await Store.open(path, { dbPath: join(dir, "missing", "articles.db") });
+    expect(restarted.state.articles.map((item) => item.id)).toEqual(["second"]);
+    restarted.close();
+    const recovered = await Store.open(path);
+    expect(recovered.state.articles.map((item) => item.id)).toEqual(["second"]);
+    expect(JSON.parse(await readFile(`${path}.bak`, "utf8")).articles).toHaveLength(2);
+    recovered.close();
   });
 });

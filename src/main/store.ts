@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { constants } from "node:fs";
 import { chmod, copyFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { stateSchema } from "../shared/schema";
-import type { Article, Feed, Language, ReaderState } from "../shared/schema";
+import { stateSchema, storedStateSchema } from "../shared/schema";
+import type { Article, ArticleRecovery, Feed, Language, ReaderState } from "../shared/schema";
 import { t } from "../shared/i18n";
 import { ARTICLES_DB_FILENAME, ArticlesDb, mergeArticle } from "./articles-db";
 import type { SearchMatch } from "./articles-db";
@@ -14,7 +15,8 @@ export class Store {
   private writing: Promise<void> = Promise.resolve();
   private db: ArticlesDb | null;
   private revisions = new Map<string, string>();
-  private restoredFromBackup = new Set<string>();
+  private restoredFromBackup = new Map<string, string>();
+  private recoveryRemoved = new Set<string>();
 
   private constructor(private readonly path: string, state: ReaderState, db: ArticlesDb | null) {
     this.state = state;
@@ -24,8 +26,11 @@ export class Store {
   static async open(path: string, options: { dbPath?: string } = {}) {
     await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     let state: ReaderState;
+    let recovery: ArticleRecovery | undefined;
     try {
-      state = stateSchema.parse(JSON.parse(await readFile(path, "utf8")));
+      const stored = storedStateSchema.parse(JSON.parse(await readFile(path, "utf8")));
+      recovery = stored.articleRecovery;
+      state = stateSchema.parse(stored);
     } catch (error) {
       if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
         throw new Error(t("en", "err.storeUnreadable"), { cause: error });
@@ -39,21 +44,24 @@ export class Store {
       console.error("reedar: article database unavailable, running without search", error);
     }
     const store = new Store(path, state, db);
-    if (!db && state.articles.length === 0) {
-      // A migrated reader.json carries no articles; when the DB cannot open, fall back to the pre-migration backup so the library is not empty.
+    store.recoveryRemoved = new Set(recovery?.removed);
+    if (!db) {
+      const articles = new Map<string, Article>();
       try {
         const backup = stateSchema.parse(JSON.parse(await readFile(`${path}.bak`, "utf8")));
-        if (backup.articles.length) {
-          state.articles = backup.articles;
-          // Backup copies are already in (or were deleted from) the database; keeping them out of reader.json stops recovery from re-importing them.
-          for (const article of backup.articles) store.restoredFromBackup.add(article.id);
-        }
-      } catch { /* no usable backup; start empty */ }
+        for (const article of backup.articles) store.restoredFromBackup.set(article.id, JSON.stringify(article));
+        for (const article of backup.articles) articles.set(article.id, article);
+      } catch { /* keep any available JSON copy */ }
+      for (const article of [...recovery?.updated ?? [], ...state.articles]) articles.set(article.id, article);
+      for (const id of store.recoveryRemoved) articles.delete(id);
+      state.articles = [...articles.values()];
     }
     if (db) {
+      if (recovery) db.write(recovery.updated.filter((article) => db.get(article.id)), recovery.removed);
       if (state.articles.length) {
         db.merge(state.articles);
-        await copyFile(path, `${path}.bak`);
+        try { await copyFile(path, `${path}.bak`, constants.COPYFILE_EXCL); }
+        catch (error) { if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error; }
         await chmod(`${path}.bak`, 0o600);
         const migrated = `${path}.migrated`;
         await writeFile(migrated, JSON.stringify(stateSchema.parse({ ...state, articles: [] })), { mode: 0o600 });
@@ -84,7 +92,12 @@ export class Store {
   save() {
     if (this.db) this.syncArticles();
     const articles = this.db ? [] : this.state.articles.filter((article) => !this.restoredFromBackup.has(article.id));
-    const data = JSON.stringify(stateSchema.parse({ ...this.state, articles }));
+    const ids = new Set(this.state.articles.map((article) => article.id));
+    const articleRecovery = this.db || (!this.restoredFromBackup.size && !this.recoveryRemoved.size) ? undefined : {
+      updated: this.state.articles.filter((article) => this.restoredFromBackup.has(article.id) && this.restoredFromBackup.get(article.id) !== JSON.stringify(article)),
+      removed: [...new Set([...this.recoveryRemoved, ...this.restoredFromBackup.keys()])].filter((id) => !ids.has(id)),
+    };
+    const data = JSON.stringify(storedStateSchema.parse({ ...this.state, articles, articleRecovery }));
     const write = this.writing.catch(() => {}).then(async () => {
       const temporary = `${this.path}.pending`;
       await writeFile(temporary, data, { mode: 0o600 });

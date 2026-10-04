@@ -92,11 +92,13 @@ export class ArticlesDb {
       db.exec("PRAGMA user_version = 1");
       const check = db.prepare("PRAGMA quick_check").get() as { quick_check: string };
       if (check.quick_check !== "ok") throw new Error(`articles.db failed integrity check: ${check.quick_check}`);
+      const articles = new ArticlesDb(db);
+      articles.all();
+      return articles;
     } catch (error) {
       db?.close();
       throw error;
     }
-    return new ArticlesDb(db);
   }
 
   close() { this.db.close(); }

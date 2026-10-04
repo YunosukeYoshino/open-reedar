@@ -94,6 +94,13 @@ export const stateSchema = z.object({
 });
 export type ReaderState = z.infer<typeof stateSchema>;
 
+export const articleRecoverySchema = z.object({
+  updated: z.array(articleSchema),
+  removed: z.array(z.string()),
+});
+export type ArticleRecovery = z.infer<typeof articleRecoverySchema>;
+export const storedStateSchema = stateSchema.extend({ articleRecovery: articleRecoverySchema.optional() });
+
 export const connectionSchema = z.object({
   agent: agentSchema,
   installed: z.boolean(),
