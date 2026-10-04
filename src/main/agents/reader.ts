@@ -132,7 +132,8 @@ export async function runReader(agent: Agent, conversation: Conversation, questi
     // The budget is in raw-text chars while prompt.length is post-escaping, so measure the
     // non-text overhead by serializing with an empty source and re-shrink until it fits.
     const empty = header + JSON.stringify({ ...input, source: { ...input.source, text: "" } });
-    let text = await condense(conversation.source.text, cap - empty.length, cap, chunkRunner(agent, path, cwd, lang), signal, lang);
+    const budget = Math.min(conversation.source.text.length - 1, cap - empty.length);
+    let text = await condense(conversation.source.text, budget, cap, chunkRunner(agent, path, cwd, lang), signal, lang);
     prompt = header + JSON.stringify({ ...input, source: { ...input.source, text } });
     while (prompt.length > cap && text.length > 0) {
       text = text.slice(0, text.length - (prompt.length - cap));

@@ -171,6 +171,24 @@ describe("reading context", () => {
       else process.env.REEDAR_APPLE_BIN = previous;
     }
   });
+  test("serialization overflow condenses the full source before the reader call", async () => {
+    const calls = join(directory, "fm-overflow.log");
+    const fm = join(directory, "fm-overflow");
+    await writeFile(fm, `#!/bin/sh\nprintf 'call\\n' >> "${calls}"\nif [ "$2" = "--model" ]; then printf '%s' "$4" >> "${calls}.prompts"; else printf '%s' "$2" >> "${calls}.prompts"; fi\nprintf 'condensed summary'\n`);
+    await Bun.spawn(["chmod", "+x", fm]).exited;
+    const previous = process.env.REEDAR_APPLE_BIN;
+    process.env.REEDAR_APPLE_BIN = fm;
+    try {
+      const source = '"'.repeat(20_000) + "TAIL_EVIDENCE";
+      const heavy = { ...conversation, agent: "apple" as const, source: { ...conversation.source, text: source } };
+      await runReader("apple", heavy, "Summarize", directory, new AbortController().signal, () => {});
+      expect((await Bun.file(calls).text()).trim().split("\n").length).toBeGreaterThan(1);
+      expect(await Bun.file(`${calls}.prompts`).text()).toContain("TAIL_EVIDENCE");
+    } finally {
+      if (previous === undefined) delete process.env.REEDAR_APPLE_BIN;
+      else process.env.REEDAR_APPLE_BIN = previous;
+    }
+  });
   test("runReader keeps article text when JSON escapes shrink the computed budget below zero", async () => {
     const calls = join(directory, "fm-escape.log");
     const fm = join(directory, "fm-escape");
