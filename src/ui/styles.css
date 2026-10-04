@@ -234,7 +234,8 @@ kbd { font: inherit; font-size: 9px; border: 1px solid #ffffff12; border-radius:
 .refresh-interval:hover { color: var(--secondary); }
 .next-cue { display: flex; flex-direction: column; align-items: center; gap: 7px; width: 100%; max-width: 770px; margin: 0 auto; padding: 30px 30px 46px; color: var(--muted); font-size: 11px; text-align: center; border-top: 1px solid var(--border); }
 button.next-cue { cursor: pointer; }
-.next-cue strong { color: #ddd6e2; font-size: 14px; font-weight: 600; text-wrap: balance; }
+/* Title clamp keeps the cue under the reader's 120px end threshold so it can't unmount itself. */
+.next-cue strong { color: #ddd6e2; font-size: 14px; font-weight: 600; text-wrap: balance; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .next-cue:hover strong, .next-cue:hover svg { color: var(--accent); }
 .next-cue svg { color: var(--muted); }
 .spin { animation: spin 1.4s linear infinite; }
