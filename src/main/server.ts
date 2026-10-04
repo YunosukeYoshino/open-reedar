@@ -4,13 +4,14 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join, resolve, sep } from "node:path";
 import { actionSchema } from "../shared/schema";
+import type { loadArticleText } from "./article-text";
 import { Engine } from "./engine";
 import { fetchPublic } from "./network";
 import { serializeOpml } from "./opml";
 import { Store } from "./store";
 import { t } from "../shared/i18n";
 
-type Options = { dataDirectory: string; staticDirectory: string; port?: number; engine?: Engine };
+type Options = { dataDirectory: string; staticDirectory: string; port?: number; engine?: Engine; renderArticleText?: typeof loadArticleText };
 const csp = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 const contentTypes: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".woff2": "font/woff2" };
 
@@ -26,7 +27,7 @@ function matchesToken(received: string | undefined, token: string) {
   return input.length === expected.length && timingSafeEqual(input, expected);
 }
 
-export async function requestBody(request: AsyncIterable<unknown>, maximumBytes = 32_000) {
+export async function requestText(request: AsyncIterable<unknown>, maximumBytes = 32_000) {
   const chunks: Buffer[] = [];
   let length = 0;
   for await (const chunk of request) {
@@ -35,12 +36,36 @@ export async function requestBody(request: AsyncIterable<unknown>, maximumBytes 
     if (length > maximumBytes) throw new Error(t("en", "err.inputTooLarge"));
     chunks.push(chunk);
   }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+export async function requestBody(request: AsyncIterable<unknown>, maximumBytes = 32_000) {
+  return JSON.parse(await requestText(request, maximumBytes)) as unknown;
+}
+
+// Bulk-import actions carry whole files inside the action body. The "type" field leads the
+// payload, so the 33 MB budget applies only once the early bytes name a bulk action.
+const bulkActions = new Set(["library.import", "opml.import"]);
+async function actionBody(request: AsyncIterable<unknown>) {
+  const chunks: Buffer[] = [];
+  let length = 0;
+  let limit = 1024 * 1024;
+  for await (const chunk of request) {
+    if (!Buffer.isBuffer(chunk)) throw new Error(t("en", "err.badInput"));
+    chunks.push(chunk);
+    length += chunk.length;
+    if (limit < 33 * 1024 * 1024 && length >= 4096) {
+      const type = /"type"\s*:\s*"([^"]+)"/.exec(Buffer.concat(chunks).subarray(0, 4096).toString("utf8"))?.[1];
+      if (type !== undefined && bulkActions.has(type)) limit = 33 * 1024 * 1024;
+    }
+    if (length > limit) throw new Error(t("en", "err.inputTooLarge"));
+  }
   return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
 }
 
 export async function startServer(options: Options) {
   const store = options.engine?.store ?? await Store.open(join(options.dataDirectory, "reader.json"));
-  const engine = options.engine ?? new Engine(store, join(options.dataDirectory, "reading-workspace"));
+  const engine = options.engine ?? new Engine(store, join(options.dataDirectory, "reading-workspace"), { renderArticleText: options.renderArticleText });
   const token = randomBytes(32).toString("hex");
   let origin = "";
   const streams = new Set<ServerResponse>();
@@ -80,10 +105,10 @@ export async function startServer(options: Options) {
     }
     if (request.method === "POST" && url.pathname === "/api/action") {
       if (request.headers.origin !== origin || !request.headers["content-type"]?.startsWith("application/json")) return json(response, 403, { error: t(store.state.language, "err.externalAction") });
-      const result = actionSchema.safeParse(await requestBody(request, 1024 * 1024));
+      const result = actionSchema.safeParse(await actionBody(request));
       if (!result.success) return json(response, 400, { error: t(store.state.language, "err.checkInput") });
-      await engine.dispatch(result.data);
-      return json(response, 200, { ok: true });
+      const outcome = await engine.dispatch(result.data);
+      return json(response, 200, outcome === undefined ? { ok: true } : { ok: true, result: outcome });
     }
     if (request.method === "GET" && url.pathname === "/api/events") {
       response.writeHead(200, { "Content-Type": "text/event-stream", Connection: "keep-alive", "X-Accel-Buffering": "no" });

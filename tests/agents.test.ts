@@ -153,9 +153,10 @@ describe("reading context", () => {
       else process.env.REEDAR_APPLE_BIN = previous;
     }
   });
-  test("runReader truncates oversized article text to the pcc cap when escalating", async () => {
-    const fm = join(directory, "fm-long");
-    await writeFile(fm, "#!/bin/sh\nprintf '%s' \"${4:-$2}\" | wc -c | tr -d ' \\n'\n");
+  test("runReader condenses oversized article text before the reader call for the Apple model", async () => {
+    const calls = join(directory, "fm-calls.log");
+    const fm = join(directory, "fm-condense");
+    await writeFile(fm, `#!/bin/sh\necho call >> "${calls}"\nprintf 'condensed'\n`);
     await Bun.spawn(["chmod", "+x", fm]).exited;
     const previous = process.env.REEDAR_APPLE_BIN;
     process.env.REEDAR_APPLE_BIN = fm;
@@ -163,7 +164,49 @@ describe("reading context", () => {
       const big = { ...conversation, agent: "apple" as const, source: { ...conversation.source, text: "a".repeat(150_000) } };
       const output: string[] = [];
       await runReader("apple", big, "要約して", directory, new AbortController().signal, (event) => { if (event.type === "delta") output.push(event.text); });
-      expect(Number(output.at(-1))).toBeLessThan(101_000);
+      // Chunk condensations plus the final reader call; the old code made a single truncated call.
+      expect((await Bun.file(calls).text()).trim().split("\n").length).toBeGreaterThan(2);
+      expect(output.at(-1)).toBe("condensed");
+    } finally {
+      if (previous === undefined) delete process.env.REEDAR_APPLE_BIN;
+      else process.env.REEDAR_APPLE_BIN = previous;
+    }
+  });
+  test("serialization overflow condenses the full source before the reader call", async () => {
+    const calls = join(directory, "fm-overflow.log");
+    const fm = join(directory, "fm-overflow");
+    await writeFile(fm, `#!/bin/sh\nprintf 'call\\n' >> "${calls}"\nif [ "$2" = "--model" ]; then printf '%s' "$4" >> "${calls}.prompts"; else printf '%s' "$2" >> "${calls}.prompts"; fi\nprintf 'condensed summary'\n`);
+    await Bun.spawn(["chmod", "+x", fm]).exited;
+    const previous = process.env.REEDAR_APPLE_BIN;
+    process.env.REEDAR_APPLE_BIN = fm;
+    try {
+      const source = '"'.repeat(60_000) + "TAIL_EVIDENCE";
+      const heavy = { ...conversation, agent: "apple" as const, source: { ...conversation.source, text: source } };
+      await runReader("apple", heavy, "Summarize", directory, new AbortController().signal, () => {});
+      expect((await Bun.file(calls).text()).trim().split("\n").length).toBeGreaterThan(1);
+      expect(await Bun.file(`${calls}.prompts`).text()).toContain("TAIL_EVIDENCE");
+    } finally {
+      if (previous === undefined) delete process.env.REEDAR_APPLE_BIN;
+      else process.env.REEDAR_APPLE_BIN = previous;
+    }
+  });
+  test("runReader keeps article text when JSON escapes shrink the computed budget below zero", async () => {
+    const calls = join(directory, "fm-escape.log");
+    const fm = join(directory, "fm-escape");
+    await writeFile(fm, `#!/bin/sh\necho call >> "${calls}"\nif [ "$2" = "--model" ]; then printf '%s' "$4" > "${calls}.last"; else printf '%s' "$2" > "${calls}.last"; fi\nprintf 'answer'\n`);
+    await Bun.spawn(["chmod", "+x", fm]).exited;
+    const previous = process.env.REEDAR_APPLE_BIN;
+    process.env.REEDAR_APPLE_BIN = fm;
+    try {
+      // 31k quote chars serialize to ~62k: the old raw-vs-escaped length math underflowed the
+      // condense budget below zero and sent an empty article.
+      const heavy = { ...conversation, agent: "apple" as const, source: { ...conversation.source, text: '"'.repeat(31_000) } };
+      const output: string[] = [];
+      await runReader("apple", heavy, "要約して", directory, new AbortController().signal, (event) => { if (event.type === "delta") output.push(event.text); });
+      const sent = await Bun.file(`${calls}.last`).text();
+      const json = JSON.parse(sent.slice(sent.indexOf('{"source"')));
+      expect(json.source.text.length).toBeGreaterThan(0);
+      expect(output.at(-1)).toBe("answer");
     } finally {
       if (previous === undefined) delete process.env.REEDAR_APPLE_BIN;
       else process.env.REEDAR_APPLE_BIN = previous;

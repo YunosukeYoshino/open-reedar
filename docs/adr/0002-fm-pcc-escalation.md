@@ -1,0 +1,10 @@
+# Apple agent PCC escalation policy
+
+The `fm` CLI exposes two execution tiers: `system` (on-device, ~8K tokens) and `pcc` (Private Cloud Compute, ~32K). We expose a `system|pcc` model option on the apple agent with two automatic behaviors, because the right tier depends on prompt size rather than user preference:
+
+- When a prompt exceeds the on-device cap, the run escalates to `pcc` automatically and tells the user via a localized notice — the alternative is a dead end (`err.tooLong`).
+- Digest and map-reduce condense runs default to `pcc` when the apple agent is selected, since their prompts are structurally large.
+
+PCC sends content to Apple's cloud, so the connection dialog states this plainly and the default tier remains `system`. When a `pcc` call fails (offline, usage limit): if the prompt fits the on-device cap we fall back to `system` with a notice; otherwise we surface a localized error suggesting retry. Silent fallbacks were rejected — the user must always know which tier answered.
+
+`fm serve` (OpenAI-compatible endpoint) was considered and rejected for now: it adds a long-lived server process and auth surface for no gain over `fm respond` per call.

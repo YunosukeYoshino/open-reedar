@@ -31,7 +31,7 @@ beforeAll(async () => {
   root = createRoot(container as unknown as HTMLElement);
   await act(async () => root.render(<App />));
   const parsed = await parseFeed('<rss version="2.0"><channel><title>Test feed</title><link>https://example.com</link><item><guid>one</guid><title>First article</title><description>First body</description></item><item><guid>two</guid><title>Second article</title><description>Second body</description></item></channel></rss>', "https://example.com/rss", null);
-  snapshot = { state: { version: 1, language: "en", folders: [], feeds: [parsed.feed], articles: parsed.articles, conversations: [], refreshMinutes: 0, fontSize: "m", appleModel: "system" }, connections: [], refreshing: false };
+  snapshot = { state: { version: 1, language: "en", folders: [], feeds: [parsed.feed], articles: parsed.articles, conversations: [], refreshMinutes: 0, fontSize: "m", articlesRetentionDays: 0, appleModel: "system" }, connections: [], refreshing: false };
   await act(async () => { stream?.onopen?.(); stream?.onmessage?.({ data: JSON.stringify({ type: "snapshot", snapshot }) }); });
 });
 afterAll(async () => {
@@ -280,4 +280,38 @@ test("OPML upload rejects invalid UTF-8 without sending mangled folder names", a
   await act(async () => form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true })));
   expect(actions).toHaveLength(before);
   expect(window.document.querySelector('#opml-error')?.textContent).toContain("UTF-8");
+});
+
+test("reader view toggles both ways and a tall next cue stays mounted at the article end", async () => {
+  const article = snapshot.state.articles[0];
+  const row = window.document.querySelector(".article-row");
+  if (!article || !(row instanceof window.HTMLElement)) throw new Error("Missing article");
+  article.readerHtml = "<p>Fetched reader body</p>";
+  article.readerText = "Fetched reader body";
+  await act(async () => {
+    stream?.onmessage?.({ data: JSON.stringify({ type: "snapshot", snapshot }) });
+    row.click();
+  });
+  for (const view of ["Feed version", "Reader view", "Feed version", "Reader view"]) {
+    const button = window.document.querySelector(`[aria-label="${view}"]`);
+    if (!(button instanceof window.HTMLButtonElement)) throw new Error(`Missing ${view}`);
+    await act(async () => button.click());
+    expect(window.document.querySelector(".article-html")?.textContent).toBe(view === "Reader view" ? "Fetched reader body" : article.text);
+  }
+  const scroll = window.document.querySelector(".reader-scroll");
+  if (!(scroll instanceof window.HTMLElement)) throw new Error("Missing reader scroll");
+  Object.defineProperties(scroll, {
+    clientHeight: { configurable: true, value: 300 },
+    scrollHeight: { configurable: true, get: () => 1000 + (scroll.querySelector(".next-cue") ? 200 : 0) },
+    scrollTop: { configurable: true, value: 900 },
+  });
+  await act(async () => scroll.dispatchEvent(new window.Event("scroll")));
+  const cue = scroll.querySelector(".next-cue");
+  if (!(cue instanceof window.HTMLElement)) throw new Error("Missing next cue");
+  Object.defineProperty(cue, "getBoundingClientRect", { value: () => new window.DOMRect(0, 0, 500, 200) });
+  Object.defineProperty(scroll, "scrollTop", { configurable: true, value: 700 });
+  await act(async () => scroll.dispatchEvent(new window.Event("scroll")));
+  expect(scroll.querySelector(".next-cue")).toBe(cue);
+  delete article.readerHtml;
+  delete article.readerText;
 });

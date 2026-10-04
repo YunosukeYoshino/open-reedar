@@ -103,6 +103,20 @@ describe("reedar cli", () => {
     expect(code).toBe(1);
     expect(errors).toContain("Could not read the library");
   });
+
+  test("Apple cloud notices go to stderr while JSON output remains valid", async () => {
+    const path = await seed("apple-notice");
+    const store = await Store.open(path);
+    const id = store.state.articles[0]!.id;
+    store.close();
+    const { code, text, errors } = await run(path, ["summarize", id, "--agent", "apple", "--json"], async (_agent, _conversation, _question, _cwd, _signal, emit) => {
+      emit({ type: "notice", text: "Sent to Private Cloud Compute" });
+      emit({ type: "delta", text: "Summary" });
+    });
+    expect(code).toBe(0);
+    expect(errors).toContain("Sent to Private Cloud Compute");
+    expect(JSON.parse(text)).toMatchObject({ answer: "Summary" });
+  });
 });
 
 describe("cli install", () => {

@@ -62,6 +62,7 @@ export const messageSchema = z.discriminatedUnion("role", [
     notice: z.string().optional(),
     purpose: z.enum(["chat", "summary"]).optional(),
     sourceOrigin: z.enum(["feed", "web"]).optional(),
+    partial: z.boolean().optional(),
   }),
 ]);
 export type Message = z.infer<typeof messageSchema>;
@@ -94,9 +95,33 @@ export const stateSchema = z.object({
   refreshMinutes: z.number().int().min(0).max(1440).default(30),
   fontSize: z.enum(["s", "m", "l"]).default("m"),
   defaultAgent: agentSchema.optional(),
+  articlesRetentionDays: z.number().int().min(0).max(3650).default(0),
   appleModel: appleModelSchema.default("system"),
 });
 export type ReaderState = z.infer<typeof stateSchema>;
+
+export const articleRecoverySchema = z.object({
+  updated: z.array(articleSchema),
+  removed: z.array(z.string()),
+});
+export type ArticleRecovery = z.infer<typeof articleRecoverySchema>;
+export const storedStateSchema = stateSchema.extend({ articleRecovery: articleRecoverySchema.optional() });
+
+export const libraryExportSchema = z.object({
+  version: z.literal(1),
+  exportedAt: z.string(),
+  folders: z.array(folderSchema),
+  feeds: z.array(feedSchema),
+  articles: z.array(articleSchema),
+  settings: z.object({
+    language: languageSchema.optional(),
+    refreshInterval: z.number().int().min(0).max(1440).optional(),
+    fontSize: z.enum(["s", "m", "l"]).optional(),
+    defaultAgent: agentSchema.optional(),
+    articlesRetentionDays: z.number().int().min(0).max(3650).optional(),
+  }),
+});
+export type LibraryExport = z.infer<typeof libraryExportSchema>;
 
 export const connectionSchema = z.object({
   agent: agentSchema,
@@ -162,6 +187,8 @@ export const snapshotSchema = z.object({
   markReadUndo: z.object({ count: z.number().int().nonnegative() }).nullable().optional(),
   feedDiscovery: z.object({ url: z.string(), candidates: z.array(z.object({ url: z.string(), title: z.string() })) }).nullable().optional(),
   digest: digestSchema.nullable().optional(),
+  search: z.object({ query: z.string(), results: z.array(z.object({ id: z.string(), feedId: z.string() })), unavailable: z.boolean().optional() }).nullable().optional(),
+  searchAvailable: z.boolean().optional(),
 });
 export type Snapshot = z.infer<typeof snapshotSchema>;
 
@@ -187,10 +214,14 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("article.star"), id: z.string(), starred: z.boolean() }),
   z.object({ type: z.literal("article.note"), id: z.string(), note: z.string().max(8000) }),
   z.object({ type: z.literal("article.highlights"), id: z.string(), highlights: z.array(z.string().max(2000)).max(100) }),
+  z.object({ type: z.literal("articles.search"), query: z.string().trim().min(1).max(500) }),
+  z.object({ type: z.literal("articles.searchClear") }),
   z.object({ type: z.literal("opml.import"), xml: z.string().min(1).max(262_144), urls: z.array(z.string()).max(200).optional(), folders: z.record(z.string(), z.string().trim().min(1).max(60)).optional() }),
   z.object({ type: z.literal("opml.preview"), xml: z.string().min(1).max(262_144) }),
   z.object({ type: z.literal("opml.previewClear") }),
   z.object({ type: z.literal("opml.stop") }),
+  z.object({ type: z.literal("library.export") }),
+  z.object({ type: z.literal("library.import"), json: z.string().min(1).max(32 * 1024 * 1024) }),
   z.object({ type: z.literal("refresh"), automatic: z.boolean().optional() }),
   z.object({ type: z.literal("connections.refresh") }),
   z.object({ type: z.literal("organize.propose"), agent: agentSchema, scope: z.enum(["library", "opml"]) }),
@@ -205,10 +236,12 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("chat.send"), articleId: z.string(), agent: agentSchema, text: z.string().trim().min(1).max(4000) }),
   z.object({ type: z.literal("chat.summarize"), articleId: z.string(), agent: agentSchema }),
   z.object({ type: z.literal("chat.stop"), conversationId: z.string() }),
+  z.object({ type: z.literal("chat.delete"), conversationId: z.string() }),
   z.object({ type: z.literal("app.setLanguage"), language: languageSchema }),
   z.object({ type: z.literal("app.setRefreshInterval"), minutes: z.number().int().min(0).max(1440) }),
   z.object({ type: z.literal("app.setFontSize"), size: z.enum(["s", "m", "l"]) }),
   z.object({ type: z.literal("app.setDefaultAgent"), agent: agentSchema }),
+  z.object({ type: z.literal("app.setArticlesRetention"), days: z.number().int().min(0).max(3650) }),
   z.object({ type: z.literal("app.setAppleModel"), model: appleModelSchema }),
   z.object({ type: z.literal("digest.run"), articleIds: z.array(z.string()).min(2).max(20), agent: agentSchema }),
   z.object({ type: z.literal("digest.cancel") }),

@@ -1,18 +1,19 @@
-import { ArrowDownUp, BookOpen, Bot, CheckCheck, ChevronDown, ChevronRight, Circle, Folder, FolderPlus, MoreHorizontal, Plus, RefreshCw, Rss, Star, Undo2 } from "lucide-react";
+import { ArrowDownUp, BookOpen, Bot, CheckCheck, ChevronDown, ChevronRight, Circle, Folder, FolderPlus, MoreHorizontal, Plus, RefreshCw, Rss, Search, Star, Undo2, X } from "lucide-react";
 import { useState } from "react";
 import type { Action, ReaderState } from "../shared/schema";
 import { tone } from "./format";
 import { useT } from "./i18n";
 
-export type Scope = { type: "all" } | { type: "feed" | "folder"; id: string };
+export type Scope = { type: "all" } | { type: "feed" | "folder"; id: string } | { type: "search" };
 export type Filter = "all" | "unread" | "starred";
 type Props = {
   state: ReaderState; scope: Scope; filter: Filter; refreshing: boolean; markReadUndo: { count: number } | null;
   select: (scope: Scope, filter?: Filter) => void; perform: (action: Action) => void;
   editFolder: (id: string | null) => void;
+  searchAvailable: boolean; globalSearch: string; setGlobalSearch: (value: string) => void;
 };
 
-export function Sidebar({ state, scope, filter, refreshing, markReadUndo, select, perform, editFolder }: Props) {
+export function Sidebar({ state, scope, filter, refreshing, markReadUndo, select, perform, editFolder, searchAvailable, globalSearch, setGlobalSearch }: Props) {
   const t = useT();
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const unread = state.articles.filter((article) => !article.read).length;
@@ -36,6 +37,11 @@ export function Sidebar({ state, scope, filter, refreshing, markReadUndo, select
       <div className="sidebar-tools"><button className="icon-button" aria-label={t("sidebar.refreshFeeds")} title={t("sidebar.refreshFeeds")} disabled={refreshing || state.feeds.length === 0} onClick={() => perform({ type: "refresh" })}><RefreshCw size={14} className={refreshing ? "spin" : ""} /></button><select className="refresh-interval" aria-label={t("sidebar.autoRefresh")} title={t("sidebar.autoRefresh")} value={state.refreshMinutes} onChange={(event) => perform({ type: "app.setRefreshInterval", minutes: Number(event.target.value) })}>{[0, 15, 30, 60, 120, 360].map((minutes) => <option key={minutes} value={minutes}>{minutes === 0 ? t("sidebar.refreshOff") : minutes < 60 ? t("sidebar.refreshMin", { minutes }) : t("sidebar.refreshHour", { hours: minutes / 60 })}</option>)}</select><button className="icon-button" commandfor="feed-dialog" command="show-modal" aria-label={t("sidebar.addFeed")} title={`${t("sidebar.addFeed")} (N)`}><Plus size={18} /></button></div>
     </div>
     <div className="sidebar-scroll">
+      <div className="search-field sidebar-search" title={searchAvailable ? undefined : t("search.unavailable")}>
+        <Search size={13} />
+        <input aria-label={t("search.placeholder")} placeholder={t("search.placeholder")} value={globalSearch} disabled={!searchAvailable} onChange={(event) => setGlobalSearch(event.target.value)} />
+        {globalSearch ? <button className="icon-button" aria-label={t("list.clearSearch")} onClick={() => setGlobalSearch("")}><X size={13} /></button> : null}
+      </div>
       <nav className="primary-nav" aria-label={t("sidebar.navKind")}>
         <button className={`nav-row ${scope.type === "all" && filter === "all" ? "selected" : ""}`} onClick={() => select({ type: "all" }, "all")}><BookOpen size={17} /><span className="nav-label">{t("app.allArticles")}</span><span className="nav-count">{state.articles.length || ""}</span></button>
         <button className={`nav-row ${scope.type === "all" && filter === "unread" ? "selected" : ""}`} onClick={() => select({ type: "all" }, "unread")}><Circle size={16} /><span className="nav-label">{t("sidebar.unread")}</span><span className="nav-count">{unread || ""}</span></button>
