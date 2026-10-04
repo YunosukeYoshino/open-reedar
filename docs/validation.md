@@ -145,3 +145,9 @@ The machine has no Developer ID Application identity. A signed/notarized package
 ## Apple Intelligence agent — September 29, 2026
 
 The `apple` agent runs through the macOS 27 `fm` command-line tool (`fm respond`). This Mac runs macOS 26.5.2 in a VM: `fm` is absent and Foundation Models reports `deviceNotEligible`, so no real on-device request was made. Detection, prompt sizing, instructions injection, UTF-8 chunk decoding, timeout/abort handling, and the empty-response path are covered by automated tests using `REEDAR_APPLE_BIN` shims (96 tests / 326 assertions). **Behavior against the real `fm` binary — exit codes, streaming granularity, and model availability when Apple Intelligence is disabled — remains unverified on hardware.** Run a live summary once on a Mac with Apple Intelligence enabled.
+
+## Integrated PR review — October 4, 2026
+
+The integration review covers map-reduce, library management, benchmarks, ADRs, streamed checkpoints, SQLite/FTS5, rendered fallback, Apple PCC, and the reader toggle/next cue. Regression tests cover degraded SQLite edits and deletions through restart/recovery, restore races with late feed additions, active-answer retention, and cloud notices on CLI stderr without corrupting JSON stdout.
+
+Apple routing, PCC escalation/fallback, digest prompt budgets, and condensation are tested with fake `fm` executables and injected runners. No actual Apple Intelligence or Private Cloud Compute request was made: the VM still reports `deviceNotEligible`. These automated checks do not establish real model availability, output quality, or cloud behavior.
