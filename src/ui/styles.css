@@ -73,6 +73,8 @@ svg { flex-shrink: 0; }
 .segmented button { flex: 1; color: var(--muted); border-radius: 4px; padding: 5px; font-size: 10px; }
 .segmented button.active { background: #3a3a42; color: #edebea; box-shadow: 0 1px 2px #0003; }
 .search-field { margin: 0 20px 14px; display: flex; align-items: center; gap: 7px; color: #777780; border: 1px solid #ffffff0b; background: #1c1d22; border-radius: 5px; padding: 0 9px; min-height: 29px; }
+.sidebar-search { margin: 0 6px 12px; }
+.sidebar-search input:disabled { opacity: 0.5; }
 .search-field input { width: 100%; min-width: 0; border: 0; outline: none; background: transparent; font-size: 11px; padding: 6px 0; }
 .search-field:focus-within { border-color: var(--accent); }
 input::placeholder, textarea::placeholder { color: #72727c; }

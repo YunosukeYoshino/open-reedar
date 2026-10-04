@@ -9,6 +9,7 @@ import { cleanArticle, discoverFeeds, loadFeed } from "./feeds";
 import { parseOpml } from "./opml";
 import { publicUrl } from "./network";
 import { Store } from "./store";
+import type { SearchMatch } from "./articles-db";
 import { installCli } from "./cli-install";
 import { defaultLanguage, t } from "../shared/i18n";
 import type { MessageKey } from "../shared/i18n";
@@ -39,6 +40,7 @@ export class Engine {
   private feedDiscoveryToken = 0;
   private digest: DigestJob | null = null;
   private digestJob: { controller: AbortController; done: Promise<void> } | undefined;
+  private searchResults: { query: string; results: SearchMatch[]; unavailable?: boolean } | null = null;
   private digestArticleIds = new Set<string>();
   private listeners = new Set<(update: Update) => void>();
   private jobs = new Map<string, { controller: AbortController; done: Promise<void> }>();
@@ -73,11 +75,19 @@ export class Engine {
       .finally(() => { this.refreshJob = undefined; });
   }
 
-  get snapshot(): Snapshot { return { state: this.store.state, connections: this.connections, refreshing: this.refreshing, opmlImport: this.opmlImport, opmlPreview: this.opmlPreview, organize: this.organize, cliInstall: this.cliInstall, markReadUndo: this.markReadUndoIds.length ? { count: this.markReadUndoIds.length } : null, feedDiscovery: this.feedDiscovery, digest: this.digest }; }
+  get snapshot(): Snapshot { return { state: this.store.state, connections: this.connections, refreshing: this.refreshing, opmlImport: this.opmlImport, opmlPreview: this.opmlPreview, organize: this.organize, cliInstall: this.cliInstall, markReadUndo: this.markReadUndoIds.length ? { count: this.markReadUndoIds.length } : null, feedDiscovery: this.feedDiscovery, digest: this.digest, search: this.searchResults, searchAvailable: this.store.searchAvailable }; }
 
   subscribe(listener: (update: Update) => void) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private emit(update: Update) { for (const listener of this.listeners) listener(update); }
-  private changed() { this.emit({ type: "snapshot", snapshot: this.snapshot }); }
+  private changed() {
+    // An open search re-runs only after article rows actually changed, so refreshes and text fetches surface in the results.
+    if (this.searchResults && this.store.articlesChanged) {
+      this.store.articlesChanged = false;
+      const results = this.store.searchArticles(this.searchResults.query);
+      this.searchResults = { query: this.searchResults.query, results: results ?? [], unavailable: results === null || undefined };
+    }
+    this.emit({ type: "snapshot", snapshot: this.snapshot });
+  }
 
   private t(key: MessageKey, params?: Record<string, string | number>) { return t(this.store.state.language, key, params); }
 
@@ -183,6 +193,13 @@ export class Engine {
         if (action.highlights.length) article.highlights = action.highlights; else delete article.highlights;
         break;
       }
+      case "articles.search": {
+        const results = this.store.searchArticles(action.query);
+        this.searchResults = { query: action.query, results: results ?? [], unavailable: results === null || undefined };
+        this.changed();
+        return;
+      }
+      case "articles.searchClear": this.searchResults = null; this.changed(); return;
       case "app.setLanguage": this.store.state.language = action.language; void this.refreshConnections(); break;
       case "app.setRefreshInterval": this.store.state.refreshMinutes = action.minutes; this.scheduleAutoRefresh(); break;
       case "app.setFontSize": this.store.state.fontSize = action.size; break;
@@ -702,5 +719,6 @@ export class Engine {
     await this.libraryImport?.catch(() => {});
     await this.settle();
     await this.store.save();
+    this.store.close();
   }
 }

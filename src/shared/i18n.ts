@@ -61,6 +61,11 @@ const en = {
   "list.unreadCount": "{count} unread",
   "list.navigateKeys": "Navigate with J/K",
 
+  // Global search
+  "search.placeholder": "Search all articles",
+  "search.title": "Search “{query}”",
+  "search.unavailable": "Search is unavailable because the article database could not be opened.",
+
   // Reader
   "reader.body": "Article body",
   "reader.previous": "Previous article",
@@ -544,6 +549,10 @@ const ja: Record<MessageKey, string> = {
   "list.emptyHint": "フィードを登録すると、ここに新しい記事が届きます。",
   "list.unreadCount": "{count}件の未読",
   "list.navigateKeys": "J/K で移動",
+
+  "search.placeholder": "すべての記事を検索",
+  "search.title": "「{query}」の検索結果",
+  "search.unavailable": "記事データベースを開けなかったため、検索を利用できません。",
 
   "reader.body": "記事本文",
   "reader.previous": "前の記事",

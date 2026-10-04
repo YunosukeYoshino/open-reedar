@@ -1,12 +1,14 @@
 #!/usr/bin/env bun
 import { homedir, tmpdir } from "node:os";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { agentSchema, stateSchema } from "../shared/schema";
 import { t } from "../shared/i18n";
 import type { Agent, Conversation, Language, ReaderState } from "../shared/schema";
 import { agentError, runReader } from "../main/agents/reader";
 import type { AgentEvent } from "../main/agents/reader";
+import { ARTICLES_DB_FILENAME, ArticlesDb } from "../main/articles-db";
 
 const USAGE = `Reedar CLI — read your local Reedar library.
 
@@ -34,7 +36,16 @@ export async function loadState(path = process.env.REEDAR_STORE ?? defaultStoreP
   let raw: string;
   try { raw = await readFile(path, "utf8"); }
   catch { throw new Error(t("en", "err.libraryUnreadable", { path })); }
-  return stateSchema.parse(JSON.parse(raw));
+  const state = stateSchema.parse(JSON.parse(raw));
+  const dbPath = join(dirname(path), ARTICLES_DB_FILENAME);
+  if (!state.articles.length && existsSync(dbPath)) {
+    try {
+      const db = ArticlesDb.open(dbPath);
+      state.articles = db.all();
+      db.close();
+    } catch { /* Degraded mode keeps the CLI on the JSON copy. */ }
+  }
+  return state;
 }
 
 type Io = { out: (text: string) => void; err?: (text: string) => void; json?: boolean };
