@@ -1,6 +1,6 @@
 // Deterministic synthetic-library benchmark for the persistence and snapshot paths.
 // Dev tool only: wired up as `bun run benchmark`, never bundled into the app.
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Engine } from "../src/main/engine";
@@ -144,7 +144,9 @@ try {
   for (const row of ROWS) { times.set(row, []); peaks.set(row, []); }
   for (const size of SIZES) {
     console.error(`benchmarking ${size.toLocaleString()} articles...`);
-    const path = join(directory, `reader-${size}.json`);
+    const libraryDirectory = join(directory, String(size));
+    await mkdir(libraryDirectory);
+    const path = join(libraryDirectory, "reader.json");
     {
       const state = stateSchema.parse(generate(size));
       const started = performance.now();
@@ -178,9 +180,11 @@ try {
     await measure("mergeFeed x30", 1, () => {
       for (const [feed, batch] of refresh) store.mergeFeed(feed, batch);
     });
+    await engine.close();
   }
 } finally {
-  await rm(directory, { recursive: true, force: true });
+  const status = await Bun.spawn(["trash", directory]).exited;
+  if (status !== 0) throw new Error(`Benchmark cleanup failed (${status})`);
 }
 
 function table(unit: string, values: Map<string, number[]> | number[]) {

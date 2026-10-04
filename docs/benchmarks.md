@@ -6,6 +6,8 @@ Synthetic articles average ~13 KB on disk (title, excerpt, multi-paragraph `html
 
 ## Results
 
+These measurements describe the JSON store before SQLite migration. The harness now gives each library size its own directory/database. RSS sampling reports the whole process, including allocations retained from earlier phases; synchronous operations can block the sampling timer, so these values are sampled observations rather than isolated phase maxima.
+
 | phase | 1k | 10k | 50k |
 | --- | --- | --- | --- |
 | reader.json | 13.1 MB | 129 MB | 642 MB |
