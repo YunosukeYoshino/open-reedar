@@ -97,7 +97,7 @@ function generate(size: number): ReaderState {
     source: { title: article.title, url: article.url, text: article.text, capturedAt: article.receivedAt },
     messages: [{ id: hexId(), role: "user" as const, text: "Summarize this.", createdAt: article.receivedAt }],
   }));
-  return { version: 1, folders, feeds, articles, conversations, language: "en", refreshMinutes: 30, fontSize: "m" };
+  return { version: 1, folders, feeds, articles, conversations, language: "en", refreshMinutes: 30, fontSize: "m", articlesRetentionDays: 0 };
 }
 
 // A feed refresh returns only the newest ~2 dozen items: mostly known ids plus a few new ones.
