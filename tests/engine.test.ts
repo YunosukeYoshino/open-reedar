@@ -3,7 +3,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthenticationRequired } from "../src/main/agents/reader";
-import type { connection, runOrganizer, runReader } from "../src/main/agents/reader";
+import type { condenseText, connection, runOrganizer, runReader } from "../src/main/agents/reader";
 import { Engine } from "../src/main/engine";
 import { parseFeed } from "../src/main/feeds";
 import { Store } from "../src/main/store";
@@ -13,14 +13,14 @@ const directory = await mkdtemp(join(tmpdir(), "reedar-engine-test-"));
 afterAll(async () => { await Bun.spawn(["trash", directory]).exited; });
 const xml = `<rss version="2.0"><channel><title>Test</title><link>https://example.com</link><item><guid>article</guid><title>Article</title><link>https://example.com/a</link><description>Evidence in the article.</description></item></channel></rss>`;
 
-async function setup(name: string, run: typeof runReader, failRefresh = false, fetchArticleText = async (_url: string, _signal: AbortSignal) => ({ text: "Evidence in the article.", html: "<p>Evidence in the article.</p>", url: "https://example.com/a" }), organize: typeof runOrganizer = async () => {}) {
+async function setup(name: string, run: typeof runReader, failRefresh = false, fetchArticleText = async (_url: string, _signal: AbortSignal) => ({ text: "Evidence in the article.", html: "<p>Evidence in the article.</p>", url: "https://example.com/a" }), organize: typeof runOrganizer = async () => {}, condense: typeof condenseText = async () => { throw new Error("condense not stubbed"); }) {
   const path = join(directory, name, "state.json");
   const store = await Store.open(path);
   const result = await parseFeed(xml, "https://example.com/rss", null);
   store.mergeFeed(result.feed, result.articles);
   const connect: typeof connection = async (agent) => ({ agent, installed: true, status: "ready", detail: "fixture" });
   const dependencies = {
-    run, connect, fetchArticleText, organize,
+    run, connect, fetchArticleText, organize, condense,
     fetchFeed: async (url: string, folderId: string | null) => { if (failRefresh) throw new Error("Network failed"); return parseFeed(xml, url, folderId); },
   };
   const engine = new Engine(store, join(directory, name, "runner"), dependencies);
@@ -667,4 +667,22 @@ describe("reading workflow", () => {
     await engine.close();
   });
 
+  test("digest condenses an oversized article to its per-article budget instead of slicing mid-sentence", async () => {
+    const condensed: { text: string; budget: number }[] = [];
+    let source = "";
+    const { engine, store, article } = await setup("digest-condense",
+      async (_agent, conversation, _question, _cwd, _signal, emit) => { source = conversation.source.text; emit({ type: "delta", text: "Digest" }); },
+      false, undefined, undefined,
+      async (_agent, text, budget) => { condensed.push({ text, budget }); return "condensed-body"; });
+    article.text = "a".repeat(40_000);
+    const second = await parseFeed(xml.replaceAll("article", "peer2"), "https://example.com/rss", null);
+    store.state.articles.push(...second.articles);
+    await engine.dispatch({ type: "digest.run", articleIds: [article.id, second.articles[0]!.id], agent: "codex" });
+    await engine.settle();
+    expect(engine.snapshot.digest).toMatchObject({ status: "completed", text: "Digest" });
+    expect(condensed).toEqual([{ text: "a".repeat(40_000), budget: 15_000 }]);
+    expect(source).toContain("condensed-body");
+    expect(source).not.toContain("a".repeat(1_000));
+    await engine.close();
+  });
 });

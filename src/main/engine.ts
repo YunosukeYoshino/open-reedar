@@ -3,7 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { z } from "zod";
 import type { Action, Agent, CliInstall, Connection, Conversation, DigestJob, LibraryExport, OpmlImport, OpmlPreview, OrganizeJob, Snapshot, Update } from "../shared/schema";
 import { agentSchema, codexModel, libraryExportSchema } from "../shared/schema";
-import { agentError, AuthenticationRequired, connection, LocalizedError, runOrganizer, runReader } from "./agents/reader";
+import { agentError, AuthenticationRequired, condenseText, connection, LocalizedError, runOrganizer, runReader } from "./agents/reader";
 import { loadArticleText } from "./article-text";
 import { cleanArticle, discoverFeeds, loadFeed } from "./feeds";
 import { parseOpml } from "./opml";
@@ -13,8 +13,8 @@ import { installCli } from "./cli-install";
 import { defaultLanguage, t } from "../shared/i18n";
 import type { MessageKey } from "../shared/i18n";
 
-type Dependencies = { fetchArticleText: typeof loadArticleText; fetchFeed: typeof loadFeed; discoverFeeds: typeof discoverFeeds; run: typeof runReader; connect: typeof connection; organize: typeof runOrganizer };
-const defaults: Dependencies = { fetchArticleText: loadArticleText, fetchFeed: loadFeed, discoverFeeds, run: runReader, connect: connection, organize: runOrganizer };
+type Dependencies = { fetchArticleText: typeof loadArticleText; fetchFeed: typeof loadFeed; discoverFeeds: typeof discoverFeeds; run: typeof runReader; connect: typeof connection; organize: typeof runOrganizer; condense: typeof condenseText };
+const defaults: Dependencies = { fetchArticleText: loadArticleText, fetchFeed: loadFeed, discoverFeeds, run: runReader, connect: connection, organize: runOrganizer, condense: condenseText };
 
 const organizeResponseSchema = z.object({
   moves: z.array(z.object({ feedId: z.string(), folder: z.string() })).max(500).optional(),
@@ -478,19 +478,13 @@ export class Engine {
   private runDigest(articleIds: string[], agent: Agent) {
     if (this.digestJob) throw new Error(this.t("err.digestRunning"));
     const picked = articleIds.map((id) => this.store.state.articles.find((article) => article.id === id)).filter((article) => article !== undefined);
-    // ponytail: articles share a text budget sized to the agent so the JSON prompt stays under its cap and every selected article is included; upgrade path is chunking with a map pass.
+    // Articles share a text budget sized to the agent so the prompt stays under its cap and every selected article is included; oversized articles are condensed to their share.
     const perArticle = Math.min(15_000, Math.floor((agent === "apple" ? 20_000 : 150_000) / Math.max(picked.length, 1)));
-    const source = picked.map((article) => `## ${article.title}\n${article.url}\n\n${(article.readerText ?? article.text).slice(0, perArticle)}`).join("\n\n");
     if (picked.filter((article) => (article.readerText ?? article.text).trim()).length < 2) {
       this.digest = { status: "failed", agent, text: "", titles: picked.map((article) => article.title), detail: this.t("err.digestEmpty") };
       this.changed();
       return;
     }
-    const conversation: Conversation = {
-      id: randomUUID(), articleId: picked[0]!.id, agent,
-      source: { title: `${picked.length} articles`, url: "", text: source, capturedAt: new Date().toISOString() },
-      messages: [],
-    };
     const controller = new AbortController();
     this.digest = { status: "running", agent, text: "", titles: picked.map((article) => article.title) };
     this.digestArticleIds = new Set(picked.map((article) => article.id));
@@ -498,6 +492,20 @@ export class Engine {
     const question = this.t("prompt.digest", { count: picked.length });
     const done = (async () => {
       try {
+        const parts: string[] = [];
+        for (const article of picked) {
+          controller.signal.throwIfAborted();
+          const raw = article.readerText ?? article.text;
+          const text = raw.length > perArticle
+            ? await this.dependencies.condense(agent, raw, perArticle, controller.signal, this.runnerDirectory, this.store.state.language)
+            : raw;
+          parts.push(`## ${article.title}\n${article.url}\n\n${text}`);
+        }
+        const conversation: Conversation = {
+          id: randomUUID(), articleId: picked[0]!.id, agent,
+          source: { title: `${picked.length} articles`, url: "", text: parts.join("\n\n"), capturedAt: new Date().toISOString() },
+          messages: [],
+        };
         await this.dependencies.run(agent, conversation, question, this.runnerDirectory, controller.signal, (event) => {
           if (controller.signal.aborted || !this.digest) return;
           if (event.type === "delta") this.digest.text = event.text;
