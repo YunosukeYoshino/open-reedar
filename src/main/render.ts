@@ -12,6 +12,8 @@ const SETTLE_POLL_MS = 400;
 // ponytail: paywalled and login-required sites stay out of scope — the isolated partition carries no user cookies and the app will not automate around access controls; upgrade path is a consented authenticated session.
 
 let renderSession: Session | undefined;
+// ponytail: serialize hidden renders to isolate cookies in the shared partition; use per-request sessions for parallel rendering.
+let rendering: Promise<void> = Promise.resolve();
 function renderWindow() {
   if (!renderSession) {
     const partition = session.fromPartition("render-article");
@@ -34,11 +36,27 @@ function renderWindow() {
 }
 
 export async function renderArticleText(url: string, signal: AbortSignal, lang: Language = "en") {
+  const previous = rendering;
+  const released = Promise.withResolvers<void>();
+  rendering = released.promise;
+  try {
+    await previous;
+    signal.throwIfAborted();
+    return await renderArticle(url, signal, lang);
+  } finally {
+    released.resolve();
+  }
+}
+
+async function renderArticle(url: string, signal: AbortSignal, lang: Language) {
   const window = renderWindow();
   const partition = renderSession!;
   const combined = AbortSignal.any([signal, AbortSignal.timeout(RENDER_TIMEOUT_MS)]);
   // One deadline covers the whole render: navigation, settling, DOM read, and extraction.
-  const race = async <T>(work: Promise<T>) => Promise.race([work, new Promise<never>((_, reject) => combined.addEventListener("abort", () => reject(new Error(t(lang, "err.timeout"))), { once: true }))]);
+  const race = async <T>(work: Promise<T>) => {
+    combined.throwIfAborted();
+    return Promise.race([work, new Promise<never>((_, reject) => combined.addEventListener("abort", () => reject(new Error(t(lang, "err.timeout"))), { once: true }))]);
+  };
   try {
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     await race(window.loadURL(url));
