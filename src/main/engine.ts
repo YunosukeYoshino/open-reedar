@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { z } from "zod";
-import type { Action, Agent, CliInstall, Connection, Conversation, DigestJob, OpmlImport, OpmlPreview, OrganizeJob, Snapshot, Update } from "../shared/schema";
-import { agentSchema, codexModel } from "../shared/schema";
-import { agentError, AuthenticationRequired, connection, LocalizedError, runOrganizer, runReader } from "./agents/reader";
+import type { Action, Agent, CliInstall, Connection, Conversation, DigestJob, LibraryExport, OpmlImport, OpmlPreview, OrganizeJob, Snapshot, Update } from "../shared/schema";
+import { agentSchema, codexModel, libraryExportSchema } from "../shared/schema";
+import { agentError, AuthenticationRequired, condenseText, connection, LocalizedError, runOrganizer, runReader } from "./agents/reader";
 import { loadArticleText, THIN_ARTICLE_TEXT_LENGTH } from "./article-text";
-import { discoverFeeds, loadFeed } from "./feeds";
+import { cleanArticle, discoverFeeds, loadFeed } from "./feeds";
 import { parseOpml } from "./opml";
 import { publicUrl } from "./network";
 import { Store } from "./store";
@@ -13,8 +13,8 @@ import { installCli } from "./cli-install";
 import { defaultLanguage, t } from "../shared/i18n";
 import type { MessageKey } from "../shared/i18n";
 
-type Dependencies = { fetchArticleText: typeof loadArticleText; renderArticleText?: typeof loadArticleText; fetchFeed: typeof loadFeed; discoverFeeds: typeof discoverFeeds; run: typeof runReader; connect: typeof connection; organize: typeof runOrganizer };
-const defaults: Dependencies = { fetchArticleText: loadArticleText, fetchFeed: loadFeed, discoverFeeds, run: runReader, connect: connection, organize: runOrganizer };
+type Dependencies = { fetchArticleText: typeof loadArticleText; renderArticleText?: typeof loadArticleText; fetchFeed: typeof loadFeed; discoverFeeds: typeof discoverFeeds; run: typeof runReader; connect: typeof connection; organize: typeof runOrganizer; condense: typeof condenseText };
+const defaults: Dependencies = { fetchArticleText: loadArticleText, fetchFeed: loadFeed, discoverFeeds, run: runReader, connect: connection, organize: runOrganizer, condense: condenseText };
 
 const organizeResponseSchema = z.object({
   moves: z.array(z.object({ feedId: z.string(), folder: z.string() })).max(500).optional(),
@@ -32,11 +32,14 @@ export class Engine {
   private organizeRun: { controller: AbortController; done: Promise<void> } | undefined;
   private autoRefreshTimer: ReturnType<typeof setInterval> | undefined;
   private refreshJob: Promise<void> | undefined;
+  private libraryImport: Promise<void> | undefined;
+  private libraryGeneration = 0;
   private markReadUndoIds: string[] = [];
   private feedDiscovery: { url: string; candidates: { url: string; title: string }[] } | null = null;
   private feedDiscoveryToken = 0;
   private digest: DigestJob | null = null;
   private digestJob: { controller: AbortController; done: Promise<void> } | undefined;
+  private digestArticleIds = new Set<string>();
   private listeners = new Set<(update: Update) => void>();
   private jobs = new Map<string, { controller: AbortController; done: Promise<void> }>();
 
@@ -49,6 +52,7 @@ export class Engine {
   async initialize() {
     await mkdir(this.runnerDirectory, { recursive: true, mode: 0o700 });
     this.scheduleAutoRefresh();
+    if (this.pruneOldArticles()) await this.store.save();
     await this.refreshConnections();
   }
 
@@ -63,7 +67,7 @@ export class Engine {
   }
 
   private queueAutoRefresh() {
-    if (this.refreshJob) return;
+    if (this.refreshJob || this.libraryImport) return;
     this.refreshJob = this.refreshFeeds(true)
       .catch((error: unknown) => { console.error("reedar: automatic refresh failed", error); })
       .finally(() => { this.refreshJob = undefined; });
@@ -102,8 +106,10 @@ export class Engine {
   }
 
   async dispatch(action: Action) {
+    while (this.libraryImport) await this.libraryImport;
     switch (action.type) {
       case "feed.add": {
+        const generation = this.libraryGeneration;
         const url = publicUrl(action.url, this.store.state.language).href;
         const existing = this.store.state.feeds.find((feed) => feed.url === url);
         if (existing?.removedAt) {
@@ -113,7 +119,9 @@ export class Engine {
         }
         if (existing) throw new Error(this.t("err.feedExists"));
         const result = await this.dependencies.fetchFeed(url, this.store.folder(action.folderId), undefined, this.store.state.language);
+        if (generation !== this.libraryGeneration) return;
         this.store.mergeFeed({ ...result.feed, etag: result.etag, lastModified: result.lastModified }, result.articles);
+        this.pruneOldArticles();
         this.feedDiscoveryToken++;
         this.feedDiscovery = null;
         break;
@@ -179,6 +187,7 @@ export class Engine {
       case "app.setRefreshInterval": this.store.state.refreshMinutes = action.minutes; this.scheduleAutoRefresh(); break;
       case "app.setFontSize": this.store.state.fontSize = action.size; break;
       case "app.setDefaultAgent": this.store.state.defaultAgent = action.agent; break;
+      case "app.setArticlesRetention": this.store.state.articlesRetentionDays = action.days; this.pruneOldArticles(); break;
       case "digest.run": this.runDigest(action.articleIds, action.agent); return;
       case "digest.cancel": this.digestJob?.controller.abort(); return;
       case "digest.clear": {
@@ -191,6 +200,10 @@ export class Engine {
       case "opml.preview": return this.previewOpml(action.xml);
       case "opml.previewClear": this.opmlPreview = null; this.changed(); return;
       case "opml.stop": this.importJob?.controller.abort(); return;
+      case "library.export": return this.exportLibrary();
+      case "library.import":
+        this.libraryImport = this.importLibrary(action.json).finally(() => { this.libraryImport = undefined; });
+        return this.libraryImport;
       case "organize.propose": return this.proposeOrganize(action.agent, action.scope);
       case "organize.apply": this.applyOrganize(action.moves, action.assignments); break;
       case "organize.cancel": this.organizeRun?.controller.abort(); this.organize = null; this.changed(); return;
@@ -209,6 +222,12 @@ export class Engine {
       case "chat.send": return this.send(action.articleId, action.agent, action.text);
       case "chat.summarize": return this.send(action.articleId, action.agent, this.t("prompt.summarize"), "summary");
       case "chat.stop": return this.stop(action.conversationId);
+      case "chat.delete": {
+        if (!this.store.state.conversations.some((item) => item.id === action.conversationId)) throw new Error(this.t("err.conversationMissing"));
+        this.jobs.get(action.conversationId)?.controller.abort();
+        this.store.state.conversations = this.store.state.conversations.filter((item) => item.id !== action.conversationId);
+        break;
+      }
     }
     await this.store.save();
     this.changed();
@@ -320,7 +339,7 @@ export class Engine {
       } catch {
         report.status = "failed";
         report.error = this.t("err.importFailed");
-      } finally { this.importJob = undefined; this.opmlPreview = null; this.changed(); }
+      } finally { this.importJob = undefined; this.opmlPreview = null; if (this.pruneOldArticles()) await this.store.save(); this.changed(); }
     })();
     this.importJob = { controller, done };
     void done.catch(() => {});
@@ -464,31 +483,44 @@ export class Engine {
         }));
         await this.store.save();
       }
-    } finally { this.refreshing = false; this.changed(); }
+    } finally {
+      this.refreshing = false;
+      if (this.pruneOldArticles()) await this.store.save();
+      this.changed();
+    }
   }
 
   private runDigest(articleIds: string[], agent: Agent) {
     if (this.digestJob) throw new Error(this.t("err.digestRunning"));
     const picked = articleIds.map((id) => this.store.state.articles.find((article) => article.id === id)).filter((article) => article !== undefined);
-    // ponytail: articles share a text budget sized to the agent so the JSON prompt stays under its cap and every selected article is included; upgrade path is chunking with a map pass.
+    // Articles share a text budget sized to the agent so the prompt stays under its cap and every selected article is included; oversized articles are condensed to their share.
     const perArticle = Math.min(15_000, Math.floor((agent === "apple" ? 20_000 : 150_000) / Math.max(picked.length, 1)));
-    const source = picked.map((article) => `## ${article.title}\n${article.url}\n\n${(article.readerText ?? article.text).slice(0, perArticle)}`).join("\n\n");
     if (picked.filter((article) => (article.readerText ?? article.text).trim()).length < 2) {
       this.digest = { status: "failed", agent, text: "", titles: picked.map((article) => article.title), detail: this.t("err.digestEmpty") };
       this.changed();
       return;
     }
-    const conversation: Conversation = {
-      id: randomUUID(), articleId: picked[0]!.id, agent,
-      source: { title: `${picked.length} articles`, url: "", text: source, capturedAt: new Date().toISOString() },
-      messages: [],
-    };
     const controller = new AbortController();
     this.digest = { status: "running", agent, text: "", titles: picked.map((article) => article.title) };
+    this.digestArticleIds = new Set(picked.map((article) => article.id));
     this.changed();
     const question = this.t("prompt.digest", { count: picked.length });
     const done = (async () => {
       try {
+        const parts: string[] = [];
+        for (const article of picked) {
+          controller.signal.throwIfAborted();
+          const raw = article.readerText ?? article.text;
+          const text = raw.length > perArticle
+            ? await this.dependencies.condense(agent, raw, perArticle, controller.signal, this.runnerDirectory, this.store.state.language)
+            : raw;
+          parts.push(`## ${article.title}\n${article.url}\n\n${text}`);
+        }
+        const conversation: Conversation = {
+          id: randomUUID(), articleId: picked[0]!.id, agent,
+          source: { title: `${picked.length} articles`, url: "", text: parts.join("\n\n"), capturedAt: new Date().toISOString() },
+          messages: [],
+        };
         await this.dependencies.run(agent, conversation, question, this.runnerDirectory, controller.signal, (event) => {
           if (controller.signal.aborted || !this.digest) return;
           if (event.type === "delta") this.digest.text = event.text;
@@ -501,10 +533,82 @@ export class Engine {
           this.digest.status = controller.signal.aborted ? "cancelled" : "failed";
           if (!controller.signal.aborted) this.digest.detail = agentError(error, this.store.state.language);
         }
-      } finally { this.digestJob = undefined; this.changed(); }
+      } finally { this.digestJob = undefined; this.digestArticleIds.clear(); this.changed(); }
     })();
     this.digestJob = { controller, done };
     void done.catch(() => { this.changed(); });
+  }
+
+  private exportLibrary(): LibraryExport {
+    const state = this.store.state;
+    return {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      folders: structuredClone(state.folders),
+      feeds: structuredClone(state.feeds),
+      articles: structuredClone(state.articles),
+      settings: {
+        language: state.language,
+        refreshInterval: state.refreshMinutes,
+        fontSize: state.fontSize,
+        defaultAgent: state.defaultAgent,
+        articlesRetentionDays: state.articlesRetentionDays,
+      },
+    };
+  }
+
+  private async importLibrary(raw: string) {
+    let backup: LibraryExport;
+    try { backup = libraryExportSchema.parse(JSON.parse(raw)); }
+    catch { throw new LocalizedError(this.t("err.libraryInvalid")); }
+    this.libraryGeneration++;
+    // Writers that merge into state (feed refresh, OPML import) must finish first or their late results would land on top of the restored library. New ones can be dispatched while waiting, so loop until none remain; the replacement below then runs without awaiting.
+    this.importJob?.controller.abort();
+    while (this.importJob || this.refreshJob) await Promise.allSettled([this.importJob?.done, this.refreshJob]);
+    for (const job of this.jobs.values()) job.controller.abort();
+    this.digestJob?.controller.abort();
+    this.organizeRun?.controller.abort();
+    await Promise.allSettled([...this.jobs.values()].map((job) => job.done).concat(this.digestJob?.done ?? [], this.organizeRun?.done ?? []));
+    const articleIds = new Set(backup.articles.map((article) => article.id));
+    for (const conversation of this.store.state.conversations) {
+      if (!articleIds.has(conversation.articleId)) this.jobs.get(conversation.id)?.controller.abort();
+    }
+    const state = this.store.state;
+    state.folders = backup.folders;
+    state.feeds = backup.feeds;
+    // Backup HTML bypasses the fetch-time sanitizer, so it is cleaned again here before it reaches dangerouslySetInnerHTML.
+    state.articles = backup.articles.map((article) => ({ ...article, html: cleanArticle(article.html, article.url).html, ...(article.readerHtml === undefined ? {} : { readerHtml: cleanArticle(article.readerHtml, article.url).html }) }));
+    state.conversations = state.conversations.filter((conversation) => articleIds.has(conversation.articleId));
+    const settings = backup.settings;
+    const languageChanged = settings.language !== undefined && settings.language !== state.language;
+    if (settings.language !== undefined) state.language = settings.language;
+    if (settings.refreshInterval !== undefined) { state.refreshMinutes = settings.refreshInterval; this.scheduleAutoRefresh(); }
+    if (settings.fontSize !== undefined) state.fontSize = settings.fontSize;
+    if (settings.defaultAgent !== undefined) state.defaultAgent = settings.defaultAgent;
+    if (settings.articlesRetentionDays !== undefined) state.articlesRetentionDays = settings.articlesRetentionDays;
+    this.markReadUndoIds = [];
+    this.pruneOldArticles();
+    if (languageChanged) void this.refreshConnections();
+    await this.store.save();
+    this.changed();
+  }
+
+  private pruneOldArticles() {
+    const days = this.store.state.articlesRetentionDays;
+    if (!days) return false;
+    const cutoff = Date.now() - days * 86_400_000;
+    const articles = this.store.state.articles;
+    const activeIds = new Set(this.store.state.conversations.filter((conversation) => this.jobs.has(conversation.id)).map((conversation) => conversation.articleId));
+    const kept = articles.filter((article) => activeIds.has(article.id) || this.digestArticleIds.has(article.id) || article.read || article.starred || article.note?.trim() || article.highlights?.length || Date.parse(article.publishedAt) >= cutoff);
+    if (kept.length === articles.length) return false;
+    const keptIds = new Set(kept.map((article) => article.id));
+    this.store.state.articles = kept;
+    for (const conversation of this.store.state.conversations) {
+      if (!keptIds.has(conversation.articleId)) this.jobs.get(conversation.id)?.controller.abort();
+    }
+    this.store.state.conversations = this.store.state.conversations.filter((conversation) => keptIds.has(conversation.articleId));
+    this.markReadUndoIds = this.markReadUndoIds.filter((id) => keptIds.has(id));
+    return true;
   }
 
   private async send(articleId: string, agent: Conversation["agent"], text: string, purpose: "chat" | "summary" = "chat") {
@@ -532,6 +636,10 @@ export class Engine {
     let notifyTimer: ReturnType<typeof setTimeout> | undefined;
     const notify = () => {
       if (!notifyTimer) notifyTimer = setTimeout(() => { notifyTimer = undefined; this.emit({ type: "conversation", conversation: current }); }, 60);
+    };
+    let checkpointTimer: ReturnType<typeof setTimeout> | undefined;
+    const checkpoint = () => {
+      if (!checkpointTimer) checkpointTimer = setTimeout(() => { checkpointTimer = undefined; void this.store.save().catch(() => {}); }, 1000);
     };
     const done = (async () => {
       try {
@@ -564,6 +672,7 @@ export class Engine {
           if (event.type === "delta") { message.text = event.text; message.state = { status: "running" }; }
           else message.state = { status: "waiting", reason: event.reason };
           notify();
+          checkpoint();
         }, this.store.state.language);
         if (!controller.signal.aborted) message.state = { status: "completed" };
       } catch (error) {
@@ -572,6 +681,8 @@ export class Engine {
           : { status: "failed", error: agentError(error, this.store.state.language) };
       } finally {
         if (notifyTimer) clearTimeout(notifyTimer);
+        if (checkpointTimer) clearTimeout(checkpointTimer);
+        if (message.text.trim() && message.state.status !== "completed") message.partial = true;
         try { await this.store.save(); }
         finally { this.jobs.delete(current.id); this.changed(); }
       }
@@ -585,7 +696,10 @@ export class Engine {
     this.jobs.get(conversationId)?.controller.abort();
     const conversation = this.store.state.conversations.find((item) => item.id === conversationId);
     const last = conversation?.messages.at(-1);
-    if (last?.role === "assistant" && ["running", "waiting"].includes(last.state.status)) last.state = { status: "cancelled" };
+    if (last?.role === "assistant" && ["running", "waiting"].includes(last.state.status)) {
+      last.state = { status: "cancelled" };
+      if (last.text.trim()) last.partial = true;
+    }
     await this.store.save();
     this.changed();
   }
@@ -600,6 +714,7 @@ export class Engine {
     this.organizeRun?.controller.abort();
     this.digestJob?.controller.abort();
     for (const job of this.jobs.values()) job.controller.abort();
+    await this.libraryImport?.catch(() => {});
     await this.settle();
     await this.store.save();
   }

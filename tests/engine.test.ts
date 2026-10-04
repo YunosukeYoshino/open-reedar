@@ -3,23 +3,24 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthenticationRequired } from "../src/main/agents/reader";
-import type { connection, runOrganizer, runReader } from "../src/main/agents/reader";
+import type { condenseText, connection, runOrganizer, runReader } from "../src/main/agents/reader";
 import { Engine } from "../src/main/engine";
 import { parseFeed } from "../src/main/feeds";
 import { Store } from "../src/main/store";
+import type { Article, LibraryExport } from "../src/shared/schema";
 
 const directory = await mkdtemp(join(tmpdir(), "reedar-engine-test-"));
 afterAll(async () => { await Bun.spawn(["trash", directory]).exited; });
 const xml = `<rss version="2.0"><channel><title>Test</title><link>https://example.com</link><item><guid>article</guid><title>Article</title><link>https://example.com/a</link><description>Evidence in the article.</description></item></channel></rss>`;
 
-async function setup(name: string, run: typeof runReader, failRefresh = false, fetchArticleText = async (_url: string, _signal: AbortSignal) => ({ text: "Evidence in the article.", html: "<p>Evidence in the article.</p>", url: "https://example.com/a" }), organize: typeof runOrganizer = async () => {}) {
+async function setup(name: string, run: typeof runReader, failRefresh = false, fetchArticleText = async (_url: string, _signal: AbortSignal) => ({ text: "Evidence in the article.", html: "<p>Evidence in the article.</p>", url: "https://example.com/a" }), organize: typeof runOrganizer = async () => {}, condense: typeof condenseText = async () => { throw new Error("condense not stubbed"); }) {
   const path = join(directory, name, "state.json");
   const store = await Store.open(path);
   const result = await parseFeed(xml, "https://example.com/rss", null);
   store.mergeFeed(result.feed, result.articles);
   const connect: typeof connection = async (agent) => ({ agent, installed: true, status: "ready", detail: "fixture" });
   const dependencies = {
-    run, connect, fetchArticleText, organize,
+    run, connect, fetchArticleText, organize, condense,
     fetchFeed: async (url: string, folderId: string | null) => { if (failRefresh) throw new Error("Network failed"); return parseFeed(xml, url, folderId); },
   };
   const engine = new Engine(store, join(directory, name, "runner"), dependencies);
@@ -30,6 +31,45 @@ async function setup(name: string, run: typeof runReader, failRefresh = false, f
 }
 
 describe("reading workflow", () => {
+  test("library restore discards a feed addition started before replacement", async () => {
+    const { store, engine } = await setup("restore-feed-add", async () => {});
+    const backup = await engine.dispatch({ type: "library.export" }) as LibraryExport;
+    backup.feeds = []; backup.articles = [];
+    const pending = Promise.withResolvers<Awaited<ReturnType<typeof parseFeed>>>();
+    const fetching = Promise.withResolvers<void>();
+    const lateEngine = new Engine(store, join(directory, "restore-feed-add", "runner"), {
+      fetchFeed: async () => { fetching.resolve(); return pending.promise; },
+    });
+    const adding = lateEngine.dispatch({ type: "feed.add", url: "https://example.com/late", folderId: null });
+    await fetching.promise;
+    await lateEngine.dispatch({ type: "library.import", json: JSON.stringify(backup) });
+    pending.resolve(await parseFeed(xml, "https://example.com/late", null));
+    await adding;
+    expect(store.state.feeds).toEqual([]);
+    expect(store.state.articles).toEqual([]);
+    await engine.close();
+  });
+
+  test("retention preserves an article and conversation while an answer is running", async () => {
+    const pending = Promise.withResolvers<void>();
+    const answering = Promise.withResolvers<void>();
+    const { engine, store, article } = await setup("retention-active", async (_agent, _conversation, _question, _cwd, signal, emit) => {
+      answering.resolve();
+      await pending.promise;
+      expect(signal.aborted).toBe(false);
+      emit({ type: "delta", text: "Kept response" });
+    });
+    article.publishedAt = "2020-01-01T00:00:00Z";
+    await engine.dispatch({ type: "chat.send", articleId: article.id, agent: "codex", text: "Hi" });
+    await answering.promise;
+    await engine.dispatch({ type: "app.setArticlesRetention", days: 30 });
+    expect(store.state.articles).toHaveLength(1);
+    expect(store.state.conversations).toHaveLength(1);
+    pending.resolve(); await engine.settle();
+    expect(store.state.conversations[0]?.messages.at(-1)).toMatchObject({ text: "Kept response", state: { status: "completed" } });
+    await engine.close();
+  });
+
   test("AI reading leaves human unread state unchanged and passes previous completed history to follow-up", async () => {
     const contexts: number[] = [];
     const { engine, store, article, path } = await setup("conversation", async (_agent, conversation, _question, _cwd, _signal, emit) => {
@@ -153,6 +193,73 @@ describe("reading workflow", () => {
     await engine.settle();
     expect((await Store.open(path)).state.conversations[0]?.messages.at(-1)).toMatchObject({ text: "Partial answer", state: { status: "cancelled" } });
     await engine.close();
+  });
+
+  test("stopping mid-stream saves the partial answer with a partial flag", async () => {
+    let started: (() => void) | undefined;
+    const ready = new Promise<void>((resolve) => { started = resolve; });
+    const { engine, store, article, path } = await setup("partial-stop", async (_agent, _conversation, _question, _cwd, signal, emit) => {
+      emit({ type: "delta", text: "Half of the answer" });
+      started?.();
+      await new Promise<void>((resolve) => { if (signal.aborted) resolve(); else signal.addEventListener("abort", () => resolve(), { once: true }); });
+    });
+    await engine.dispatch({ type: "chat.send", articleId: article.id, agent: "codex", text: "Summarize" });
+    await ready;
+    const conversation = store.state.conversations[0];
+    if (!conversation) throw new Error("conversation missing");
+    await engine.dispatch({ type: "chat.stop", conversationId: conversation.id });
+    await engine.settle();
+    expect((await Store.open(path)).state.conversations[0]?.messages.at(-1)).toMatchObject({ text: "Half of the answer", partial: true, state: { status: "cancelled" } });
+    await engine.close();
+  });
+
+  test("a mid-stream failure keeps the partial answer alongside the error", async () => {
+    const { engine, store, article, path } = await setup("partial-fail", async (_agent, _conversation, _question, _cwd, _signal, emit) => {
+      emit({ type: "delta", text: "Almost there" });
+      throw new Error("boom");
+    });
+    await engine.dispatch({ type: "chat.send", articleId: article.id, agent: "codex", text: "Summarize" });
+    await engine.settle();
+    // toMatchObject mutates the received value on asymmetric matchers, so assert on a clone.
+    expect(structuredClone(store.state.conversations[0]?.messages.at(-1))).toMatchObject({ text: "Almost there", partial: true, state: { status: "failed", error: expect.any(String) } });
+    expect((await Store.open(path)).state.conversations[0]?.messages.at(-1)).toMatchObject({ text: "Almost there", partial: true });
+    await engine.close();
+  });
+
+  test("a failure before any output keeps only the error", async () => {
+    const { engine, store, article } = await setup("clean-fail", async () => { throw new Error("boom"); });
+    await engine.dispatch({ type: "chat.send", articleId: article.id, agent: "codex", text: "Summarize" });
+    await engine.settle();
+    const message = store.state.conversations[0]?.messages.at(-1);
+    expect(structuredClone(message)).toMatchObject({ text: "", state: { status: "failed", error: expect.any(String) } });
+    expect(message).not.toHaveProperty("partial");
+    await engine.close();
+  });
+
+  test("closing the engine mid-stream preserves the partial answer across restarts", async () => {
+    let started: (() => void) | undefined;
+    const ready = new Promise<void>((resolve) => { started = resolve; });
+    const { engine, store, article, path } = await setup("partial-quit", async (_agent, _conversation, _question, _cwd, signal, emit) => {
+      emit({ type: "delta", text: "Unfinished thought" });
+      started?.();
+      await new Promise<void>((resolve) => { if (signal.aborted) resolve(); else signal.addEventListener("abort", () => resolve(), { once: true }); });
+      throw new Error("aborted");
+    });
+    await engine.dispatch({ type: "chat.send", articleId: article.id, agent: "codex", text: "Summarize" });
+    await ready;
+    expect(store.state.conversations[0]?.messages.at(-1)).toMatchObject({ text: "Unfinished thought", state: { status: "running" } });
+    await engine.close();
+    expect((await Store.open(path)).state.conversations[0]?.messages.at(-1)).toMatchObject({ text: "Unfinished thought", partial: true, state: { status: "cancelled" } });
+  });
+
+  test("a run interrupted by a hard exit is recovered as a partial answer", async () => {
+    const path = join(directory, "partial-crash", "state.json");
+    const store = await Store.open(path);
+    const result = await parseFeed(xml, "https://example.com/rss", null);
+    store.mergeFeed(result.feed, result.articles);
+    store.state.conversations.push({ id: "crashed", articleId: result.articles[0]!.id, agent: "codex", source: { title: "T", url: "https://example.com/a", text: "body", capturedAt: new Date().toISOString() }, messages: [{ id: "m", role: "assistant", text: "Streamed so far", createdAt: new Date().toISOString(), state: { status: "running" } }] });
+    await store.save();
+    expect((await Store.open(path)).state.conversations[0]?.messages.at(-1)).toMatchObject({ text: "Streamed so far", partial: true, state: { status: "failed" } });
   });
 
   test("authentication is a waiting state, not a fake completed response", async () => {
@@ -465,6 +572,184 @@ describe("reading workflow", () => {
     await engine.settle();
     expect(engine.snapshot.digest).toMatchObject({ status: "completed", text: "Digest" });
     expect(question.length).toBeGreaterThan(0);
+    await engine.close();
+  });
+
+  test("library export and import round-trip the full library", async () => {
+    const { engine, store, article } = await setup("library-export", async (_agent, _conversation, _question, _cwd, _signal, emit) => { emit({ type: "delta", text: "Hi" }); });
+    article.starred = true;
+    article.note = "Keep this";
+    article.readerText = "Reader text";
+    article.highlights = ["Marked passage"];
+    store.saveFolder(null, "Tech");
+    store.state.feeds[0]!.folderId = store.state.folders[0]!.id;
+    await engine.dispatch({ type: "chat.send", articleId: article.id, agent: "codex", text: "Hi" });
+    await engine.settle();
+    await engine.dispatch({ type: "app.setLanguage", language: "ja" });
+    await engine.dispatch({ type: "app.setRefreshInterval", minutes: 60 });
+    await engine.dispatch({ type: "app.setFontSize", size: "l" });
+    await engine.dispatch({ type: "app.setArticlesRetention", days: 90 });
+    const exported = await engine.dispatch({ type: "library.export" }) as LibraryExport;
+    expect(exported.version).toBe(1);
+    expect(Date.parse(exported.exportedAt)).not.toBeNaN();
+    const backup = exported;
+    expect(backup.articles[0]).toMatchObject({ id: article.id, starred: true, note: "Keep this", readerText: "Reader text", highlights: ["Marked passage"] });
+    expect(backup.settings).toMatchObject({ language: "ja", refreshInterval: 60, fontSize: "l", articlesRetentionDays: 90 });
+    expect(backup).not.toHaveProperty("conversations");
+
+    const path2 = join(directory, "library-import", "state.json");
+    const store2 = await Store.open(path2);
+    store2.state.conversations.push(
+      { id: "kept", articleId: article.id, agent: "codex", source: { title: "T", url: "https://example.com/a", text: "", capturedAt: new Date().toISOString() }, messages: [] },
+      { id: "dropped", articleId: "missing", agent: "codex", source: { title: "T", url: "https://example.com/a", text: "", capturedAt: new Date().toISOString() }, messages: [] },
+    );
+    const connect: typeof connection = async (agent) => ({ agent, installed: true, status: "ready", detail: "fixture" });
+    const engine2 = new Engine(store2, join(directory, "library-import", "runner"), { run: async () => {}, connect, fetchFeed: async () => { throw new Error("unused"); } });
+    await engine2.initialize();
+    await engine2.dispatch({ type: "library.import", json: JSON.stringify(exported) });
+    expect(store2.state).toMatchObject({ language: "ja", refreshMinutes: 60, fontSize: "l", articlesRetentionDays: 90 });
+    expect(store2.state.articles[0]).toMatchObject({ id: article.id, starred: true, note: "Keep this" });
+    expect(store2.state.feeds[0]?.folderId).toBe(store2.state.folders[0]?.id);
+    expect(store2.state.conversations.map((item) => item.id)).toEqual(["kept"]);
+    expect((await Store.open(path2)).state.articles).toHaveLength(1);
+    const reExported = await engine2.dispatch({ type: "library.export" }) as LibraryExport;
+    const strip = (doc: LibraryExport) => ({ ...doc, exportedAt: "" });
+    expect(strip(reExported)).toEqual(strip(backup));
+    await engine.close();
+    await engine2.close();
+  });
+
+  test("library import rejects malformed files and an empty backup wipes the library", async () => {
+    const { engine, store } = await setup("library-bad", async () => {});
+    const before = structuredClone(store.state);
+    await expect(engine.dispatch({ type: "library.import", json: "not json" })).rejects.toThrow("not a valid Reedar library backup");
+    await expect(engine.dispatch({ type: "library.import", json: JSON.stringify({ version: 2, exportedAt: "", feeds: [], folders: [], articles: [], settings: {} }) })).rejects.toThrow("not a valid Reedar library backup");
+    await expect(engine.dispatch({ type: "library.import", json: JSON.stringify({ version: 1, exportedAt: "", feeds: [], folders: [], articles: [], settings: { language: "tr" } }) })).rejects.toThrow("not a valid Reedar library backup");
+    expect(store.state).toEqual(before);
+    await engine.dispatch({ type: "library.import", json: JSON.stringify({ version: 1, exportedAt: "", feeds: [], folders: [], articles: [], settings: {} }) });
+    expect(store.state.feeds).toHaveLength(0);
+    expect(store.state.articles).toHaveLength(0);
+    const hostile = JSON.parse(JSON.stringify(before.articles[0])) as Article;
+    hostile.html = "<p>Body</p><script>alert(1)</script><iframe src=\"https://evil.example\"></iframe>";
+    hostile.readerHtml = "<p>Reader</p><script>alert(1)</script>";
+    await engine.dispatch({ type: "library.import", json: JSON.stringify({ version: 1, exportedAt: "", feeds: before.feeds, folders: [], articles: [hostile], settings: {} }) });
+    expect(store.state.articles[0]?.html).toBe("<p>Body</p>");
+    expect(store.state.articles[0]?.readerHtml).toBe("<p>Reader</p>");
+    await engine.close();
+  });
+
+  test("restoring while a refresh is in flight does not lose the backup to late merges", async () => {
+    let release: (() => void) | undefined;
+    const waiting = new Promise<void>((resolve) => { release = resolve; });
+    const path = join(directory, "library-race", "state.json");
+    const store = await Store.open(path);
+    const parsed = await parseFeed(xml, "https://example.com/rss", null);
+    store.mergeFeed(parsed.feed, parsed.articles);
+    const connect: typeof connection = async (agent) => ({ agent, installed: true, status: "ready", detail: "fixture" });
+    const engine = new Engine(store, join(directory, "library-race", "runner"), {
+      run: async () => {}, connect,
+      fetchFeed: async (url, folderId) => { await waiting; return parseFeed(xml.replaceAll("article", "fresh"), url, folderId); },
+    });
+    await engine.initialize();
+    const refreshing = engine.dispatch({ type: "refresh" });
+    const backup = structuredClone(await engine.dispatch({ type: "library.export" })) as { articles: { id: string; title: string }[] };
+    backup.articles[0]!.title = "Restored title";
+    const importing = engine.dispatch({ type: "library.import", json: JSON.stringify(backup) });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    release?.();
+    await Promise.all([refreshing, importing]);
+    expect(store.state.articles.map((item) => item.title)).toEqual(["Restored title"]);
+    expect(store.state.articles.map((item) => item.id)).toEqual([parsed.articles[0]!.id]);
+    expect(store.state.articles[0]?.read).toBe(false);
+    await engine.close();
+  });
+
+  test("chat.delete removes the conversation but keeps its article", async () => {
+    const { engine, store, article, path } = await setup("chat-delete", async (_agent, _conversation, _question, _cwd, _signal, emit) => { emit({ type: "delta", text: "Done" }); });
+    await engine.dispatch({ type: "chat.send", articleId: article.id, agent: "codex", text: "Hi" });
+    await engine.settle();
+    const conversation = store.state.conversations[0];
+    if (!conversation) throw new Error("fixture missing");
+    expect(conversation.messages).toHaveLength(2);
+    await engine.dispatch({ type: "chat.delete", conversationId: conversation.id });
+    expect(store.state.conversations).toHaveLength(0);
+    expect(store.article(article.id).id).toBe(article.id);
+    expect((await Store.open(path)).state.conversations).toHaveLength(0);
+    await expect(engine.dispatch({ type: "chat.delete", conversationId: conversation.id })).rejects.toThrow("Conversation not found");
+    await engine.dispatch({ type: "chat.send", articleId: article.id, agent: "codex", text: "Again" });
+    await engine.settle();
+    expect(store.state.conversations).toHaveLength(1);
+    await engine.close();
+  });
+
+  test("retention drops only old unread, unstarred, unannotated articles", async () => {
+    const { engine, store, article, path } = await setup("retention", async () => {});
+    const old = new Date(Date.now() - 45 * 86_400_000).toISOString();
+    const add = async (guid: string, mark?: (item: Article) => void) => {
+      const parsed = await parseFeed(xml.replaceAll("article", guid), "https://example.com/rss", null);
+      parsed.articles[0]!.publishedAt = old;
+      mark?.(parsed.articles[0]!);
+      store.state.articles.push(...parsed.articles);
+      return parsed.articles[0]!;
+    };
+    await engine.dispatch({ type: "chat.send", articleId: article.id, agent: "codex", text: "Hi" });
+    await engine.settle();
+    const recent = await add("recent");
+    recent.publishedAt = new Date().toISOString();
+    const starred = await add("starred", (item) => { item.starred = true; });
+    const noted = await add("noted", (item) => { item.note = "pin"; });
+    const highlighted = await add("highlight", (item) => { item.highlights = ["mark"]; });
+    const read = await add("read", (item) => { item.read = true; });
+    article.publishedAt = old;
+    const keptIds = new Set([recent.id, starred.id, noted.id, highlighted.id, read.id]);
+    await engine.dispatch({ type: "app.setArticlesRetention", days: 30 });
+    expect(new Set(store.state.articles.map((item) => item.id))).toEqual(keptIds);
+    expect(store.state.conversations).toHaveLength(0);
+    expect((await Store.open(path)).state.articles).toHaveLength(keptIds.size);
+    await engine.close();
+
+    const path3 = join(directory, "retention-start", "state.json");
+    const store3 = await Store.open(path3);
+    const parsed3 = await parseFeed(xml, "https://example.com/rss", null);
+    parsed3.articles[0]!.publishedAt = old;
+    store3.mergeFeed(parsed3.feed, parsed3.articles);
+    store3.state.articlesRetentionDays = 30;
+    const connect: typeof connection = async (agent) => ({ agent, installed: true, status: "ready", detail: "fixture" });
+    const engine3 = new Engine(store3, join(directory, "retention-start", "runner"), { run: async () => {}, connect, fetchFeed: async () => { throw new Error("unused"); } });
+    await engine3.initialize();
+    expect(store3.state.articles).toHaveLength(0);
+    await engine3.close();
+  });
+
+  test("library import re-sanitizes article HTML instead of trusting the backup", async () => {
+    const { engine, store } = await setup("library-sanitize", async () => {});
+    const exported = await engine.dispatch({ type: "library.export" }) as LibraryExport;
+    exported.articles[0]!.readerHtml = '<p>ok</p><script>alert(1)</script><img src="https://e.com/i.png" onerror="alert(2)"><img src="/image?url=https%3A%2F%2Fe.com%2Fkept.png">';
+    await engine.dispatch({ type: "library.import", json: JSON.stringify(exported) });
+    const html = store.state.articles[0]!.readerHtml!;
+    expect(html).not.toMatch(/script|onerror/);
+    expect(html).toContain("/image?url=");
+    expect(html).toContain("/image?url=https%3A%2F%2Fe.com%2Fkept.png");
+    expect(html).not.toContain("image%3Furl%3D");
+    await engine.close();
+  });
+
+  test("digest condenses an oversized article to its per-article budget instead of slicing mid-sentence", async () => {
+    const condensed: { text: string; budget: number }[] = [];
+    let source = "";
+    const { engine, store, article } = await setup("digest-condense",
+      async (_agent, conversation, _question, _cwd, _signal, emit) => { source = conversation.source.text; emit({ type: "delta", text: "Digest" }); },
+      false, undefined, undefined,
+      async (_agent, text, budget) => { condensed.push({ text, budget }); return "condensed-body"; });
+    article.text = "a".repeat(40_000);
+    const second = await parseFeed(xml.replaceAll("article", "peer2"), "https://example.com/rss", null);
+    store.state.articles.push(...second.articles);
+    await engine.dispatch({ type: "digest.run", articleIds: [article.id, second.articles[0]!.id], agent: "codex" });
+    await engine.settle();
+    expect(engine.snapshot.digest).toMatchObject({ status: "completed", text: "Digest" });
+    expect(condensed).toEqual([{ text: "a".repeat(40_000), budget: 15_000 }]);
+    expect(source).toContain("condensed-body");
+    expect(source).not.toContain("a".repeat(1_000));
     await engine.close();
   });
 });

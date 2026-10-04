@@ -1,10 +1,11 @@
 import { Download, Sparkles, Upload } from "lucide-react";
 import { useRef, useState } from "react";
-import type { Action, Agent, OpmlImport, OpmlPreview, OrganizeJob } from "../shared/schema";
+import type { Action, Agent, LibraryExport, OpmlImport, OpmlPreview, OrganizeJob } from "../shared/schema";
+import { libraryExportSchema } from "../shared/schema";
 import { Dialog } from "./Dialog";
 import { useT } from "./i18n";
 
-type Props = { report: OpmlImport | null | undefined; preview: OpmlPreview | null | undefined; hasFeeds: boolean; act: (action: Action) => Promise<void>; perform: (action: Action) => void; organize: OrganizeJob | null | undefined; agent: Agent | null };
+type Props = { report: OpmlImport | null | undefined; preview: OpmlPreview | null | undefined; hasFeeds: boolean; act: (action: Action) => Promise<unknown>; perform: (action: Action) => void; organize: OrganizeJob | null | undefined; agent: Agent | null };
 const isSelectable = (resolution: OpmlPreview["entries"][number]["resolution"]) => resolution === "new" || resolution === "restorable";
 
 export function OpmlDialog({ report, preview, hasFeeds, act, perform, organize, agent }: Props) {
@@ -16,6 +17,11 @@ export function OpmlDialog({ report, preview, hasFeeds, act, perform, organize, 
   const [deselected, setDeselected] = useState<Set<string>>(new Set());
   const [pickedMissing, setPickedMissing] = useState<Set<string>>(new Set());
   const [confirmingMissing, setConfirmingMissing] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [restored, setRestored] = useState(false);
+  const [libraryError, setLibraryError] = useState<string | null>(null);
+  const [pendingRestore, setPendingRestore] = useState<{ json: string; doc: LibraryExport } | null>(null);
   const running = report?.status === "running";
   const chosen = preview ? preview.entries.filter((entry) => isSelectable(entry.resolution) && !deselected.has(entry.url)) : [];
   async function readFile(file: File) {
@@ -49,8 +55,49 @@ export function OpmlDialog({ report, preview, hasFeeds, act, perform, organize, 
   }
   function close() {
     setXml(null); setDeselected(new Set()); setPickedMissing(new Set()); setConfirmingMissing(false); setError(null);
+    setLibraryError(null); setPendingRestore(null); setRestored(false);
     perform({ type: "opml.previewClear" });
     if (organize?.scope === "opml") perform({ type: "organize.cancel" });
+  }
+  async function exportLibrary() {
+    if (exporting || restoring) return;
+    setExporting(true); setLibraryError(null); setRestored(false);
+    try {
+      const outcome = await act({ type: "library.export" }) as { result?: unknown };
+      const parsed = libraryExportSchema.safeParse(outcome?.result);
+      if (!parsed.success) throw new Error(t("library.exportFailed"));
+      const url = URL.createObjectURL(new Blob([JSON.stringify(parsed.data, null, 2)], { type: "application/json" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `open-reedar-library-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    }
+    catch (cause: unknown) { setLibraryError(cause instanceof Error ? cause.message : t("library.exportFailed")); }
+    finally { setExporting(false); }
+  }
+  async function readLibraryFile(file: File) {
+    setLibraryError(null); setRestored(false); setPendingRestore(null);
+    if (file.size > 32 * 1024 * 1024) { setLibraryError(t("library.fileTooLarge")); return; }
+    let text: string;
+    try { text = new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer()); }
+    catch { setLibraryError(t("library.readFailed")); return; }
+    let parsed: ReturnType<typeof libraryExportSchema.safeParse>;
+    try { parsed = libraryExportSchema.safeParse(JSON.parse(text)); }
+    catch { setLibraryError(t("library.invalidFile")); return; }
+    if (!parsed.success) { setLibraryError(t("library.invalidFile")); return; }
+    setPendingRestore({ json: text, doc: parsed.data });
+  }
+  async function restoreLibrary() {
+    if (!pendingRestore || restoring) return;
+    setRestoring(true); setLibraryError(null);
+    try {
+      await act({ type: "library.import", json: pendingRestore.json });
+      setPendingRestore(null);
+      setRestored(true);
+    }
+    catch (cause: unknown) { setLibraryError(cause instanceof Error ? cause.message : t("library.restoreFailed")); }
+    finally { setRestoring(false); }
   }
   function toggle(url: string, checked: boolean) {
     const next = new Set(deselected);
@@ -76,6 +123,24 @@ export function OpmlDialog({ report, preview, hasFeeds, act, perform, organize, 
     {preview ? <PreviewSection preview={preview} deselected={deselected} toggle={toggle} selectable={selectable} chosen={chosen} setDeselected={setDeselected} pickedMissing={pickedMissing} toggleMissing={toggleMissing} confirmingMissing={confirmingMissing} setConfirmingMissing={setConfirmingMissing} apply={apply} removeMissing={removeMissing} disabled={sending || running} organize={organize} agent={agent} act={act} perform={perform} /> : null}
     {report ? <ImportReport report={report} /> : null}
     <div className="opml-export"><h3>{t("opml.exportTitle")}</h3><p className="dialog-description">{t("opml.exportDescription")}</p>{hasFeeds ? <a className="secondary-button" href="/api/opml" download="Reedar.opml"><Download size={14} />{t("opml.export")}</a> : <button className="secondary-button" disabled><Download size={14} />{t("opml.export")}</button>}</div>
+    <div className="opml-export">
+      <h3>{t("library.backupTitle")}</h3>
+      <p className="dialog-description">{t("library.backupDescription")}</p>
+      <button className="secondary-button" type="button" disabled={exporting || restoring} onClick={() => void exportLibrary()}><Download size={14} />{exporting ? t("library.exporting") : t("library.export")}</button>
+      <form onSubmit={(event) => event.preventDefault()}>
+        <label htmlFor="library-file">{t("library.fileLabel")}</label>
+        <input id="library-file" name="library" type="file" accept=".json,application/json" disabled={restoring || exporting} aria-invalid={!!libraryError} onChange={(event) => { const file = event.target.files?.[0]; if (file) void readLibraryFile(file); event.target.value = ""; }} />
+      </form>
+      {libraryError ? <p className="form-error" role="alert">{libraryError}</p> : null}
+      {restored ? <p className="dialog-description" role="status">{t("library.restored")}</p> : null}
+      {pendingRestore ? <section className="opml-preview" aria-label={t("library.restoreApply")}>
+        <p>{t("library.restoreSummary", { feeds: pendingRestore.doc.feeds.length, folders: pendingRestore.doc.folders.length, articles: pendingRestore.doc.articles.length })}</p>
+        <div className="dialog-actions">
+          <button className="primary-button" type="button" disabled={restoring} onClick={() => void restoreLibrary()}><Upload size={14} />{restoring ? t("library.exporting") : t("library.restoreApply")}</button>
+          <button className="secondary-button" type="button" disabled={restoring} onClick={() => setPendingRestore(null)}>{t("app.cancel")}</button>
+        </div>
+      </section> : null}
+    </div>
   </Dialog>;
 }
 
@@ -83,7 +148,7 @@ function PreviewSection({ preview, deselected, toggle, selectable, chosen, setDe
   preview: OpmlPreview; deselected: Set<string>; toggle: (url: string, checked: boolean) => void; selectable: string[]; chosen: OpmlPreview["entries"]; setDeselected: (value: Set<string>) => void;
   pickedMissing: Set<string>; toggleMissing: (id: string, checked: boolean) => void; confirmingMissing: boolean; setConfirmingMissing: (value: boolean) => void;
   apply: () => Promise<void>; removeMissing: () => Promise<void>; disabled: boolean;
-  organize: OrganizeJob | null | undefined; agent: Agent | null; act: (action: Action) => Promise<void>; perform: (action: Action) => void;
+  organize: OrganizeJob | null | undefined; agent: Agent | null; act: (action: Action) => Promise<unknown>; perform: (action: Action) => void;
 }) {
   const t = useT();
   const job = organize?.scope === "opml" ? organize : null;

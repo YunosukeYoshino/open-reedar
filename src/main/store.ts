@@ -22,12 +22,13 @@ export class Store {
       if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
         throw new Error(t("en", "err.storeUnreadable"), { cause: error });
       }
-      state = { version: 1, folders: [], feeds: [], articles: [], conversations: [], language: "en", refreshMinutes: 30, fontSize: "m" };
+      state = { version: 1, folders: [], feeds: [], articles: [], conversations: [], language: "en", refreshMinutes: 30, fontSize: "m", articlesRetentionDays: 0 };
     }
     for (const conversation of state.conversations) {
       for (const message of conversation.messages) {
         if (message.role === "assistant" && ["running", "waiting"].includes(message.state.status)) {
           message.state = { status: "failed", error: t(state.language, "err.interrupted") };
+          if (message.text.trim()) message.partial = true;
         }
       }
     }
