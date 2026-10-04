@@ -175,11 +175,17 @@ Built with **Electron, React, TypeScript, and Bun**. Source lives in `src/main` 
 
 ## Scope
 
-This preview focuses on reading a local feed library and discussing individual articles. It does not yet include scheduled refresh, full-library backup/restore, Inoreader or other service sync, mobile clients, automatic digests, or Developer ID signed installers. Large-library performance has not been benchmarked.
+This preview includes scheduled feed refresh, full-library backup/restore, conversation deletion, article retention, multi-article digests, and a [large-library benchmark](docs/benchmarks.md). Service sync, mobile clients, recurring automatic digests, and Developer ID signed installers remain outside this preview.
 
 The [roadmap checklist](ROADMAP.md) tracks completed work, public-preview preparation, daily-reader improvements, and longer-term candidates.
 
-Normal shutdown preserves partial answers. A crash may lose deltas written since the last save; interrupted responses are marked as failed on the next launch. Corrupt storage produces an error instead of being replaced with an empty library.
+Streamed answers are checkpointed approximately once per second. Normal shutdown, cancellation, and failures preserve received text with a partial-answer marker; a crash can lose deltas since the last successful checkpoint. Interrupted responses are marked as failed on the next launch.
+
+Articles and annotations migrate automatically to `articles.db` (SQLite with FTS5 search across titles, feed text, and extracted reader text). Feeds, folders, settings, and conversations remain in `reader.json`; the original migration copy remains in `reader.json.bak`. If SQLite cannot open, the app uses JSON and the backup with search disabled. Backup edits and deletion records persist separately and are applied when the database recovers; unchanged backup rows do not resurrect deleted database articles. Keep the entire data directory when making filesystem backups.
+
+The sidebar library menu exports/restores feeds, folders, articles, and reading settings. Restore replaces that data, sanitizes imported HTML, stops AI jobs, waits for running refresh/import jobs, and retains conversations only for restored article IDs. Conversation deletion leaves its article intact. Optional retention deletes old unread articles, preserving read, starred, noted, highlighted, recent, and currently active AI articles.
+
+Apple Intelligence uses the macOS 27 `fm` CLI. The connection dialog selects `system` (default) or `pcc`. Serialized prompts above 30,000 characters escalate to Private Cloud Compute with a localized cloud notice; the PCC cap is 100,000 characters. Apple digests and condensation use PCC by default. A failed PCC request falls back to system only when the prompt fits its cap, with a notice; CLI notices go to stderr. Longer sources use at most two map-reduce condensation passes and may then be truncated, requiring additional agent calls. Real `fm`/PCC behavior is [unverified on this VM](docs/validation.md#apple-intelligence-agent--september-29-2026).
 
 ## Contributing
 

@@ -156,6 +156,7 @@ const en = {
   "ai.deleteConversation": "Delete conversation",
   "ai.deleteConfirm": "Delete this conversation? The article stays in your library.",
   "ai.delete": "Delete",
+  "ai.partialAnswer": "Partial answer",
 
   // Run states
   "run.running": "Answering",
@@ -636,6 +637,7 @@ const ja: Record<MessageKey, string> = {
   "ai.deleteConversation": "会話を削除",
   "ai.deleteConfirm": "この会話を削除しますか？記事はライブラリに残ります。",
   "ai.delete": "削除",
+  "ai.partialAnswer": "部分的な回答",
 
   "run.running": "回答中",
   "run.waiting": "確認待ち",

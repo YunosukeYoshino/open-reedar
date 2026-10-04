@@ -26,7 +26,7 @@ export function ArticleContent({ article, agent, conversation, act, perform, web
   return <>
     <div className="summary-toolbar"><button className="summary-toggle" aria-label={showSummary ? t("reader.backToFeed") : t("reader.summarize")} aria-pressed={showSummary} disabled={!showSummary && !summary && busy} onClick={() => { if (showSummary || summary) setShowSummary(!showSummary); else void summarize(); }}><FileText size={15} />{showSummary ? t("reader.backToFeed") : summary ? t("reader.readSummary") : t("reader.summarize")}</button><span>{!summary ? t("reader.summarizeSend", { agent: agent === "codex" ? t("reader.agentLabel") : agentName[agent] }) : agent === "codex" ? t("reader.agentLabel") : agentName[agent]}</span></div>
     {showSummary ? <section className="reader-summary" aria-label={t("reader.summaryAria")}>
-      <div className="summary-heading"><h2>{t("reader.summaryTitle")}</h2>{summary?.role === "assistant" ? <RunStatus state={summary.state} /> : null}<button className="text-button" disabled={busy} onClick={() => void summarize()}>{t("reader.reSummarize")}</button></div>
+      <div className="summary-heading"><h2>{t("reader.summaryTitle")}</h2>{summary?.role === "assistant" ? <RunStatus state={summary.state} /> : null}{summary?.role === "assistant" && summary.partial ? <span className="partial-badge">{t("ai.partialAnswer")}</span> : null}<button className="text-button" disabled={busy} onClick={() => void summarize()}>{t("reader.reSummarize")}</button></div>
       {error ? <p className="form-error" role="alert">{error}</p> : null}
       {summary?.role === "assistant" ? <>
         <div className="markdown"><MarkdownText text={summary.text} /></div>

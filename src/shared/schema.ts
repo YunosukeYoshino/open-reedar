@@ -59,6 +59,7 @@ export const messageSchema = z.discriminatedUnion("role", [
     model: z.string().optional(),
     purpose: z.enum(["chat", "summary"]).optional(),
     sourceOrigin: z.enum(["feed", "web"]).optional(),
+    partial: z.boolean().optional(),
   }),
 ]);
 export type Message = z.infer<typeof messageSchema>;
