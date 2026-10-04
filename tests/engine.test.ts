@@ -31,6 +31,45 @@ async function setup(name: string, run: typeof runReader, failRefresh = false, f
 }
 
 describe("reading workflow", () => {
+  test("library restore discards a feed addition started before replacement", async () => {
+    const { store, engine } = await setup("restore-feed-add", async () => {});
+    const backup = await engine.dispatch({ type: "library.export" }) as LibraryExport;
+    backup.feeds = []; backup.articles = [];
+    const pending = Promise.withResolvers<Awaited<ReturnType<typeof parseFeed>>>();
+    const fetching = Promise.withResolvers<void>();
+    const lateEngine = new Engine(store, join(directory, "restore-feed-add", "runner"), {
+      fetchFeed: async () => { fetching.resolve(); return pending.promise; },
+    });
+    const adding = lateEngine.dispatch({ type: "feed.add", url: "https://example.com/late", folderId: null });
+    await fetching.promise;
+    await lateEngine.dispatch({ type: "library.import", json: JSON.stringify(backup) });
+    pending.resolve(await parseFeed(xml, "https://example.com/late", null));
+    await adding;
+    expect(store.state.feeds).toEqual([]);
+    expect(store.state.articles).toEqual([]);
+    await engine.close();
+  });
+
+  test("retention preserves an article and conversation while an answer is running", async () => {
+    const pending = Promise.withResolvers<void>();
+    const answering = Promise.withResolvers<void>();
+    const { engine, store, article } = await setup("retention-active", async (_agent, _conversation, _question, _cwd, signal, emit) => {
+      answering.resolve();
+      await pending.promise;
+      expect(signal.aborted).toBe(false);
+      emit({ type: "delta", text: "Kept response" });
+    });
+    article.publishedAt = "2020-01-01T00:00:00Z";
+    await engine.dispatch({ type: "chat.send", articleId: article.id, agent: "codex", text: "Hi" });
+    await answering.promise;
+    await engine.dispatch({ type: "app.setArticlesRetention", days: 30 });
+    expect(store.state.articles).toHaveLength(1);
+    expect(store.state.conversations).toHaveLength(1);
+    pending.resolve(); await engine.settle();
+    expect(store.state.conversations[0]?.messages.at(-1)).toMatchObject({ text: "Kept response", state: { status: "completed" } });
+    await engine.close();
+  });
+
   test("AI reading leaves human unread state unchanged and passes previous completed history to follow-up", async () => {
     const contexts: number[] = [];
     const { engine, store, article, path } = await setup("conversation", async (_agent, conversation, _question, _cwd, _signal, emit) => {

@@ -32,11 +32,14 @@ export class Engine {
   private organizeRun: { controller: AbortController; done: Promise<void> } | undefined;
   private autoRefreshTimer: ReturnType<typeof setInterval> | undefined;
   private refreshJob: Promise<void> | undefined;
+  private libraryImport: Promise<void> | undefined;
+  private libraryGeneration = 0;
   private markReadUndoIds: string[] = [];
   private feedDiscovery: { url: string; candidates: { url: string; title: string }[] } | null = null;
   private feedDiscoveryToken = 0;
   private digest: DigestJob | null = null;
   private digestJob: { controller: AbortController; done: Promise<void> } | undefined;
+  private digestArticleIds = new Set<string>();
   private listeners = new Set<(update: Update) => void>();
   private jobs = new Map<string, { controller: AbortController; done: Promise<void> }>();
 
@@ -64,7 +67,7 @@ export class Engine {
   }
 
   private queueAutoRefresh() {
-    if (this.refreshJob) return;
+    if (this.refreshJob || this.libraryImport) return;
     this.refreshJob = this.refreshFeeds(true)
       .catch((error: unknown) => { console.error("reedar: automatic refresh failed", error); })
       .finally(() => { this.refreshJob = undefined; });
@@ -103,8 +106,10 @@ export class Engine {
   }
 
   async dispatch(action: Action) {
+    while (this.libraryImport) await this.libraryImport;
     switch (action.type) {
       case "feed.add": {
+        const generation = this.libraryGeneration;
         const url = publicUrl(action.url, this.store.state.language).href;
         const existing = this.store.state.feeds.find((feed) => feed.url === url);
         if (existing?.removedAt) {
@@ -114,6 +119,7 @@ export class Engine {
         }
         if (existing) throw new Error(this.t("err.feedExists"));
         const result = await this.dependencies.fetchFeed(url, this.store.folder(action.folderId), undefined, this.store.state.language);
+        if (generation !== this.libraryGeneration) return;
         this.store.mergeFeed({ ...result.feed, etag: result.etag, lastModified: result.lastModified }, result.articles);
         this.pruneOldArticles();
         this.feedDiscoveryToken++;
@@ -195,7 +201,9 @@ export class Engine {
       case "opml.previewClear": this.opmlPreview = null; this.changed(); return;
       case "opml.stop": this.importJob?.controller.abort(); return;
       case "library.export": return this.exportLibrary();
-      case "library.import": return this.importLibrary(action.json);
+      case "library.import":
+        this.libraryImport = this.importLibrary(action.json).finally(() => { this.libraryImport = undefined; });
+        return this.libraryImport;
       case "organize.propose": return this.proposeOrganize(action.agent, action.scope);
       case "organize.apply": this.applyOrganize(action.moves, action.assignments); break;
       case "organize.cancel": this.organizeRun?.controller.abort(); this.organize = null; this.changed(); return;
@@ -485,6 +493,7 @@ export class Engine {
     };
     const controller = new AbortController();
     this.digest = { status: "running", agent, text: "", titles: picked.map((article) => article.title) };
+    this.digestArticleIds = new Set(picked.map((article) => article.id));
     this.changed();
     const question = this.t("prompt.digest", { count: picked.length });
     const done = (async () => {
@@ -501,7 +510,7 @@ export class Engine {
           this.digest.status = controller.signal.aborted ? "cancelled" : "failed";
           if (!controller.signal.aborted) this.digest.detail = agentError(error, this.store.state.language);
         }
-      } finally { this.digestJob = undefined; this.changed(); }
+      } finally { this.digestJob = undefined; this.digestArticleIds.clear(); this.changed(); }
     })();
     this.digestJob = { controller, done };
     void done.catch(() => { this.changed(); });
@@ -529,9 +538,14 @@ export class Engine {
     let backup: LibraryExport;
     try { backup = libraryExportSchema.parse(JSON.parse(raw)); }
     catch { throw new LocalizedError(this.t("err.libraryInvalid")); }
+    this.libraryGeneration++;
     // Writers that merge into state (feed refresh, OPML import) must finish first or their late results would land on top of the restored library. New ones can be dispatched while waiting, so loop until none remain; the replacement below then runs without awaiting.
     this.importJob?.controller.abort();
     while (this.importJob || this.refreshJob) await Promise.allSettled([this.importJob?.done, this.refreshJob]);
+    for (const job of this.jobs.values()) job.controller.abort();
+    this.digestJob?.controller.abort();
+    this.organizeRun?.controller.abort();
+    await Promise.allSettled([...this.jobs.values()].map((job) => job.done).concat(this.digestJob?.done ?? [], this.organizeRun?.done ?? []));
     const articleIds = new Set(backup.articles.map((article) => article.id));
     for (const conversation of this.store.state.conversations) {
       if (!articleIds.has(conversation.articleId)) this.jobs.get(conversation.id)?.controller.abort();
@@ -561,7 +575,8 @@ export class Engine {
     if (!days) return false;
     const cutoff = Date.now() - days * 86_400_000;
     const articles = this.store.state.articles;
-    const kept = articles.filter((article) => article.read || article.starred || article.note?.trim() || article.highlights?.length || Date.parse(article.publishedAt) >= cutoff);
+    const activeIds = new Set(this.store.state.conversations.filter((conversation) => this.jobs.has(conversation.id)).map((conversation) => conversation.articleId));
+    const kept = articles.filter((article) => activeIds.has(article.id) || this.digestArticleIds.has(article.id) || article.read || article.starred || article.note?.trim() || article.highlights?.length || Date.parse(article.publishedAt) >= cutoff);
     if (kept.length === articles.length) return false;
     const keptIds = new Set(kept.map((article) => article.id));
     this.store.state.articles = kept;
@@ -666,6 +681,7 @@ export class Engine {
     this.organizeRun?.controller.abort();
     this.digestJob?.controller.abort();
     for (const job of this.jobs.values()) job.controller.abort();
+    await this.libraryImport?.catch(() => {});
     await this.settle();
     await this.store.save();
   }
