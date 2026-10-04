@@ -1,3 +1,4 @@
+import { addAbortListener } from "node:events";
 import { BrowserWindow, session } from "electron";
 import type { Session } from "electron";
 import { extractArticle } from "./article-text";
@@ -38,12 +39,15 @@ function renderWindow() {
 export async function renderArticleText(url: string, signal: AbortSignal, lang: Language = "en") {
   const previous = rendering;
   const released = Promise.withResolvers<void>();
-  rendering = released.promise;
+  const cancelled = Promise.withResolvers<never>();
+  const listener = addAbortListener(signal, () => cancelled.reject(signal.reason));
+  rendering = previous.then(() => released.promise);
   try {
-    await previous;
+    await Promise.race([previous, cancelled.promise]);
     signal.throwIfAborted();
     return await renderArticle(url, signal, lang);
   } finally {
+    listener[Symbol.dispose]();
     released.resolve();
   }
 }
