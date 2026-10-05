@@ -139,7 +139,7 @@ export async function cli(argv: string[], io: Io, run: typeof runReader = runRea
       let text = "";
       const emit = (event: AgentEvent) => {
         if (event.type === "delta") text = event.text;
-        else if (event.type === "notice") io.err?.(`${event.text}\n`);
+        else if (event.type === "notice") err(`${event.text}\n`);
       };
       const controller = new AbortController();
       process.on("SIGINT", () => controller.abort());
