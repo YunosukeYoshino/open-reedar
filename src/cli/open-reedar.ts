@@ -137,10 +137,13 @@ export async function cli(argv: string[], io: Io, run: typeof runReader = runRea
         messages: [],
       };
       let text = "";
-      const emit = (event: AgentEvent) => { if (event.type === "delta") text = event.text; };
+      const emit = (event: AgentEvent) => {
+        if (event.type === "delta") text = event.text;
+        else if (event.type === "notice") err(`${event.text}\n`);
+      };
       const controller = new AbortController();
       process.on("SIGINT", () => controller.abort());
-      await run(agent, conversation, option(args, "question") ?? t(lang, "prompt.summarize"), tmpdir(), controller.signal, emit, lang);
+      await run(agent, conversation, option(args, "question") ?? t(lang, "prompt.summarize"), tmpdir(), controller.signal, emit, lang, state.appleModel);
       if (!text) throw new Error(t(lang, "err.noAnswer"));
       out(json ? JSON.stringify({ articleId: article.id, agent, answer: text }) : text);
       return 0;

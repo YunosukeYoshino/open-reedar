@@ -35,7 +35,7 @@ export class Store {
       if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
         throw new Error(t("en", "err.storeUnreadable"), { cause: error });
       }
-      state = { version: 1, folders: [], feeds: [], articles: [], conversations: [], language: "en", refreshMinutes: 30, fontSize: "m", articlesRetentionDays: 0 };
+      state = { version: 1, folders: [], feeds: [], articles: [], conversations: [], language: "en", refreshMinutes: 30, fontSize: "m", articlesRetentionDays: 0, appleModel: "system" };
     }
     let db: ArticlesDb | null = null;
     try {

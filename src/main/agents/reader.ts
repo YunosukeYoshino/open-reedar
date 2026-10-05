@@ -1,13 +1,13 @@
 import { createInterface } from "node:readline";
 import { StringDecoder } from "node:string_decoder";
 import { z } from "zod";
-import type { Agent, Connection, Conversation, Language } from "../../shared/schema";
+import type { Agent, AppleModel, Connection, Conversation, Language } from "../../shared/schema";
 import { codexModel } from "../../shared/schema";
 import { t } from "../../shared/i18n";
 import { condense } from "./condense";
 import { claudeArguments, cliNames, codexArguments, executable, launch, RpcClient, terminate } from "./process";
 
-export type AgentEvent = { type: "delta"; text: string } | { type: "waiting"; reason: string };
+export type AgentEvent = { type: "delta"; text: string } | { type: "waiting"; reason: string } | { type: "notice"; text: string };
 export class LocalizedError extends Error {}
 export class AuthenticationRequired extends LocalizedError {}
 
@@ -97,43 +97,52 @@ export function agentError(error: unknown, lang: Language = "en") {
 }
 
 // The on-device model context is ~8k tokens, so fm prompts are capped at 30k chars.
-const fmPromptLimit = 30_000;
+export const fmPromptLimit = 30_000;
+export const fmPccPromptLimit = 100_000;
 // Hosted agents comfortably read ~150k chars; the serialized prompt is capped at 180k.
 const promptLimit = 180_000;
 
-function promptCap(agent: Agent) { return agent === "apple" ? fmPromptLimit : promptLimit; }
+function promptCap(agent: Agent, model: AppleModel = "system") { return agent === "apple" ? model === "pcc" ? fmPccPromptLimit : fmPromptLimit : promptLimit; }
 
 // Runs the agent on a condensation chunk and returns its full text; chunk deltas are not answer output.
-function chunkRunner(agent: Agent, path: string, cwd: string, lang: Language) {
+function chunkRunner(agent: Agent, path: string, cwd: string, lang: Language, model: AppleModel = "system", emit?: (event: AgentEvent) => void) {
   return async (prompt: string, signal: AbortSignal) => {
     let text = "";
-    const collect = (event: AgentEvent) => { if (event.type === "delta") text = event.text; };
-    if (agent === "apple") await runFm(path, prompt, cwd, signal, collect, lang);
+    const collect = (event: AgentEvent) => {
+      if (event.type === "delta") text = event.text;
+      else if (event.type === "notice") emit?.({ type: "notice", text: t(lang, "notice.condense", { detail: event.text }) });
+    };
+    if (agent === "apple") {
+      if (model === "pcc") collect({ type: "notice", text: t(lang, "notice.pcc") });
+      await runFm(path, prompt, cwd, signal, collect, lang, model);
+    }
     else if (agent === "claude") await runClaude(path, prompt, cwd, signal, collect, "condense", lang);
     else await runCodex(path, prompt, cwd, signal, collect, undefined, "condense", lang);
     return text;
   };
 }
 
-export async function condenseText(agent: Agent, text: string, budget: number, signal: AbortSignal, cwd: string, lang: Language = "en"): Promise<string> {
+export async function condenseText(agent: Agent, text: string, budget: number, signal: AbortSignal, cwd: string, lang: Language = "en", appleModel: AppleModel = "system", emit?: (event: AgentEvent) => void): Promise<string> {
   if (agent === "antigravity") throw new LocalizedError(t(lang, "err.antigravity"));
-  return condense(text, budget, promptCap(agent), chunkRunner(agent, await executable(agent), cwd, lang), signal, lang);
+  return condense(text, budget, promptCap(agent, appleModel), chunkRunner(agent, await executable(agent), cwd, lang, appleModel, emit), signal, lang);
 }
 
-export async function runReader(agent: Agent, conversation: Conversation, question: string, cwd: string, signal: AbortSignal, emit: (event: AgentEvent) => void, lang: Language = "en") {
+export async function runReader(agent: Agent, conversation: Conversation, question: string, cwd: string, signal: AbortSignal, emit: (event: AgentEvent) => void, lang: Language = "en", appleModel: AppleModel = "system") {
   if (agent === "antigravity") throw new LocalizedError(t(lang, "err.antigravity"));
   if (signal.aborted) throw new LocalizedError(t(lang, "err.aborted"));
   const path = await executable(agent);
-  const cap = promptCap(agent);
   const header = agent === "apple" ? `${sessionProfile("reader", lang).instructions}\n\n` : "";
   const input = readerInput(conversation, question);
   let prompt = header + JSON.stringify(input);
+  const model = agent === "apple" && appleModel === "system" && prompt.length > fmPromptLimit ? "pcc" : appleModel;
+  const cap = promptCap(agent, model);
+  if (agent === "apple" && model === "pcc") emit({ type: "notice", text: t(lang, appleModel === "system" ? "notice.pccEscalated" : "notice.pcc") });
   if (prompt.length > cap) {
     // The budget is in raw-text chars while prompt.length is post-escaping, so measure the
     // non-text overhead by serializing with an empty source and re-shrink until it fits.
     const empty = header + JSON.stringify({ ...input, source: { ...input.source, text: "" } });
     const budget = Math.min(conversation.source.text.length - 1, cap - empty.length);
-    let text = await condense(conversation.source.text, budget, cap, chunkRunner(agent, path, cwd, lang), signal, lang);
+    let text = await condense(conversation.source.text, budget, cap, chunkRunner(agent, path, cwd, lang, model, emit), signal, lang);
     prompt = header + JSON.stringify({ ...input, source: { ...input.source, text } });
     while (prompt.length > cap && text.length > 0) {
       text = text.slice(0, text.length - (prompt.length - cap));
@@ -141,28 +150,44 @@ export async function runReader(agent: Agent, conversation: Conversation, questi
     }
     if (prompt.length > cap) throw new LocalizedError(t(lang, "err.tooLong"));
   }
-  if (agent === "apple") return runFm(path, prompt, cwd, signal, emit, lang);
+  if (agent === "apple") return runFm(path, prompt, cwd, signal, emit, lang, model);
   if (agent === "claude") return runClaude(path, prompt, cwd, signal, emit, "reader", lang);
   return runCodex(path, prompt, cwd, signal, emit, undefined, "reader", lang);
 }
 
-export async function runOrganizer(agent: Agent, prompt: string, cwd: string, signal: AbortSignal, emit: (event: AgentEvent) => void, lang: Language = "en") {
+export async function runOrganizer(agent: Agent, prompt: string, cwd: string, signal: AbortSignal, emit: (event: AgentEvent) => void, lang: Language = "en", appleModel: AppleModel = "system") {
   if (agent === "antigravity") throw new LocalizedError(t(lang, "err.antigravity"));
   if (prompt.length > 180_000) throw new LocalizedError(t(lang, "err.organizeTooLarge"));
   if (signal.aborted) throw new LocalizedError(t(lang, "err.aborted"));
   const path = await executable(agent);
   if (agent === "apple") {
-    const fmPrompt = `${sessionProfile("organizer", lang).instructions}\n\n${prompt}`;
-    if (fmPrompt.length > fmPromptLimit) throw new LocalizedError(t(lang, "err.organizeTooLarge"));
-    return runFm(path, fmPrompt, cwd, signal, emit, lang);
+    const header = `${sessionProfile("organizer", lang).instructions}\n\n`;
+    const fmPrompt = header + prompt;
+    let model = appleModel;
+    if (fmPrompt.length > fmPromptLimit && model === "system") model = "pcc";
+    if (fmPrompt.length > (model === "pcc" ? fmPccPromptLimit : fmPromptLimit)) throw new LocalizedError(t(lang, "err.organizeTooLarge"));
+    if (model === "pcc") emit({ type: "notice", text: t(lang, appleModel === "system" ? "notice.pccEscalated" : "notice.pcc") });
+    return runFm(path, fmPrompt, cwd, signal, emit, lang, model);
   }
   if (agent === "claude") return runClaude(path, prompt, cwd, signal, emit, "organizer", lang);
   return runCodex(path, prompt, cwd, signal, emit, undefined, "organizer", lang);
 }
 
-async function runFm(path: string, prompt: string, cwd: string, signal: AbortSignal, emit: (event: AgentEvent) => void, lang: Language = "en") {
+// A cloud-tier failure falls back to the on-device model only when the prompt fits it; the user is always told which tier answered.
+async function runFm(path: string, prompt: string, cwd: string, signal: AbortSignal, emit: (event: AgentEvent) => void, lang: Language = "en", model: AppleModel = "system") {
+  try {
+    await fmRespond(path, prompt, model, cwd, signal, emit, lang);
+  } catch (error) {
+    if (signal.aborted || model === "system") throw error;
+    if (prompt.length > fmPromptLimit) throw new LocalizedError(t(lang, "err.pccFailed"));
+    emit({ type: "notice", text: t(lang, "notice.pccFallback") });
+    await fmRespond(path, prompt, "system", cwd, signal, emit, lang);
+  }
+}
+
+async function fmRespond(path: string, prompt: string, model: AppleModel, cwd: string, signal: AbortSignal, emit: (event: AgentEvent) => void, lang: Language = "en") {
   await new Promise<void>((resolve, reject) => {
-    const child = launch(path, ["respond", prompt], cwd);
+    const child = launch(path, model === "pcc" ? ["respond", "--model", "pcc", prompt] : ["respond", prompt], cwd);
     const decoder = new StringDecoder("utf8");
     let text = "";
     let failure: Error | null = null;

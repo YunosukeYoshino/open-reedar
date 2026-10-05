@@ -32,6 +32,28 @@ async function run(path: string, argv: string[], runner?: Parameters<typeof cli>
 }
 
 describe("reedar cli", () => {
+  test("summarize keeps cloud notices when the error writer is omitted", async () => {
+    const path = await seed("notice-fallback");
+    const store = await Store.open(path);
+    const id = store.state.articles[0]!.id;
+    store.close();
+    const previousPath = process.env.REEDAR_STORE;
+    process.env.REEDAR_STORE = path;
+    const lines: string[] = [];
+    try {
+      const code = await cli(["summarize", id, "--agent", "apple"], { out: (line) => lines.push(line) }, async (_agent, _conversation, _question, _cwd, _signal, emit) => {
+        emit({ type: "notice", text: "Sent to Private Cloud Compute" });
+        emit({ type: "delta", text: "Summary" });
+      });
+      expect(code).toBe(0);
+      expect(lines.join("\n")).toContain("Sent to Private Cloud Compute");
+      expect(lines.at(-1)).toBe("Summary");
+    } finally {
+      if (previousPath === undefined) delete process.env.REEDAR_STORE;
+      else process.env.REEDAR_STORE = previousPath;
+    }
+  });
+
   test("feeds lists active feeds with unread and star counts", async () => {
     const path = await seed("feeds");
     const { code, text } = await run(path, ["feeds"]);
@@ -102,6 +124,20 @@ describe("reedar cli", () => {
     const { code, errors } = await run(join(directory, "missing", "reader.json"), ["feeds"]);
     expect(code).toBe(1);
     expect(errors).toContain("Could not read the library");
+  });
+
+  test("Apple cloud notices go to stderr while JSON output remains valid", async () => {
+    const path = await seed("apple-notice");
+    const store = await Store.open(path);
+    const id = store.state.articles[0]!.id;
+    store.close();
+    const { code, text, errors } = await run(path, ["summarize", id, "--agent", "apple", "--json"], async (_agent, _conversation, _question, _cwd, _signal, emit) => {
+      emit({ type: "notice", text: "Sent to Private Cloud Compute" });
+      emit({ type: "delta", text: "Summary" });
+    });
+    expect(code).toBe(0);
+    expect(errors).toContain("Sent to Private Cloud Compute");
+    expect(JSON.parse(text)).toMatchObject({ answer: "Summary" });
   });
 });
 

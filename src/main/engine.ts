@@ -3,7 +3,8 @@ import { mkdir } from "node:fs/promises";
 import { z } from "zod";
 import type { Action, Agent, CliInstall, Connection, Conversation, DigestJob, LibraryExport, OpmlImport, OpmlPreview, OrganizeJob, Snapshot, Update } from "../shared/schema";
 import { agentSchema, codexModel, libraryExportSchema } from "../shared/schema";
-import { agentError, AuthenticationRequired, condenseText, connection, LocalizedError, runOrganizer, runReader } from "./agents/reader";
+import { agentError, AuthenticationRequired, condenseText, connection, fmPccPromptLimit, LocalizedError, runOrganizer, runReader } from "./agents/reader";
+import type { AgentEvent } from "./agents/reader";
 import { loadArticleText, THIN_ARTICLE_TEXT_LENGTH } from "./article-text";
 import { cleanArticle, discoverFeeds, loadFeed } from "./feeds";
 import { parseOpml } from "./opml";
@@ -40,8 +41,8 @@ export class Engine {
   private feedDiscoveryToken = 0;
   private digest: DigestJob | null = null;
   private digestJob: { controller: AbortController; done: Promise<void> } | undefined;
-  private searchResults: { query: string; results: SearchMatch[]; unavailable?: boolean } | null = null;
   private digestArticleIds = new Set<string>();
+  private searchResults: { query: string; results: SearchMatch[]; unavailable?: boolean } | null = null;
   private listeners = new Set<(update: Update) => void>();
   private jobs = new Map<string, { controller: AbortController; done: Promise<void> }>();
 
@@ -205,6 +206,7 @@ export class Engine {
       case "app.setFontSize": this.store.state.fontSize = action.size; break;
       case "app.setDefaultAgent": this.store.state.defaultAgent = action.agent; break;
       case "app.setArticlesRetention": this.store.state.articlesRetentionDays = action.days; this.pruneOldArticles(); break;
+      case "app.setAppleModel": this.store.state.appleModel = action.model; break;
       case "digest.run": this.runDigest(action.articleIds, action.agent); return;
       case "digest.cancel": this.digestJob?.controller.abort(); return;
       case "digest.clear": {
@@ -374,15 +376,21 @@ export class Engine {
     this.changed();
     const done = (async () => {
       let text = "";
+      let notice: string | undefined;
       try {
         await this.dependencies.organize(agent, prompt, this.runnerDirectory, controller.signal, (event) => {
-          if (!controller.signal.aborted && event.type === "delta") text = event.text;
-        }, this.store.state.language);
+          if (controller.signal.aborted) return;
+          if (event.type === "delta") text = event.text;
+          else if (event.type === "notice") {
+            notice = event.text;
+            if (this.organize) { this.organize.notice = notice; this.changed(); }
+          }
+        }, this.store.state.language, this.store.state.appleModel);
         if (controller.signal.aborted) return;
-        this.organize = { scope, agent, status: "completed", startedAt, plan: this.organizePlan(scope, text) };
+        this.organize = { scope, agent, status: "completed", startedAt, plan: this.organizePlan(scope, text), ...(notice ? { notice } : {}) };
       } catch (error) {
         this.organize = controller.signal.aborted ? null
-          : { scope, agent, status: "failed", startedAt, detail: agentError(error, this.store.state.language) };
+          : { scope, agent, status: "failed", startedAt, detail: agentError(error, this.store.state.language), ...(notice ? { notice } : {}) };
       } finally { this.organizeRun = undefined; this.changed(); }
     })();
     this.organizeRun = { controller, done };
@@ -510,8 +518,26 @@ export class Engine {
   private runDigest(articleIds: string[], agent: Agent) {
     if (this.digestJob) throw new Error(this.t("err.digestRunning"));
     const picked = articleIds.map((id) => this.store.state.articles.find((article) => article.id === id)).filter((article) => article !== undefined);
-    // Articles share a text budget sized to the agent so the prompt stays under its cap and every selected article is included; oversized articles are condensed to their share.
-    const perArticle = Math.min(15_000, Math.floor((agent === "apple" ? 20_000 : 150_000) / Math.max(picked.length, 1)));
+    // ponytail: articles share a text budget sized to the agent so the JSON prompt stays under its cap and every selected article is included; upgrade path is chunking with a map pass.
+    // Apple digests run on Private Cloud Compute by default: the ~32K-token tier leaves ~10k chars for the instructions and JSON envelope.
+    const perArticle = Math.min(15_000, Math.floor((agent === "apple" ? fmPccPromptLimit - 10_000 : 150_000) / Math.max(picked.length, 1)));
+    // perArticle budgets the JSON-serialized block, so escaping overhead can't push the final prompt past the cap and silently drop tail articles.
+    const blockFor = (article: (typeof picked)[number], text: string) => {
+      const floor = Math.min(500, text.length);
+      const floorBody = text.slice(0, floor);
+      // Budget by serialized size: escape-heavy titles cost ~2x after JSON.stringify, so measure rather than assume.
+      const size = (value: string) => JSON.stringify(value).length;
+      const headerFor = (title: string) => `## ${title}\n${article.url}\n\n`;
+      let title = article.title;
+      while (title && size(headerFor(title) + floorBody) > perArticle) title = title.slice(0, Math.floor(title.length / 2));
+      let header = headerFor(title);
+      if (size(header + floorBody) > perArticle) header = `## ${title}\n\n`;
+      let body = text.slice(0, perArticle);
+      while (body.length > floor && size(header + body) > perArticle) {
+        body = body.slice(0, Math.max(floor, Math.floor(body.length * perArticle / size(header + body)) - 1));
+      }
+      return header + body;
+    };
     if (picked.filter((article) => (article.readerText ?? article.text).trim()).length < 2) {
       this.digest = { status: "failed", agent, text: "", titles: picked.map((article) => article.title), detail: this.t("err.digestEmpty") };
       this.changed();
@@ -522,6 +548,13 @@ export class Engine {
     this.digestArticleIds = new Set(picked.map((article) => article.id));
     this.changed();
     const question = this.t("prompt.digest", { count: picked.length });
+    const emit = (event: AgentEvent) => {
+      if (controller.signal.aborted || !this.digest) return;
+      if (event.type === "delta") this.digest.text = event.text;
+      else if (event.type === "notice") this.digest.notice = [...new Set([...(this.digest.notice?.split("\n") ?? []), event.text])].join("\n");
+      else this.digest.detail = event.reason;
+      this.changed();
+    };
     const done = (async () => {
       try {
         const parts: string[] = [];
@@ -529,21 +562,16 @@ export class Engine {
           controller.signal.throwIfAborted();
           const raw = article.readerText ?? article.text;
           const text = raw.length > perArticle
-            ? await this.dependencies.condense(agent, raw, perArticle, controller.signal, this.runnerDirectory, this.store.state.language)
+            ? await this.dependencies.condense(agent, raw, perArticle, controller.signal, this.runnerDirectory, this.store.state.language, agent === "apple" ? "pcc" : "system", emit)
             : raw;
-          parts.push(`## ${article.title}\n${article.url}\n\n${text}`);
+          parts.push(blockFor(article, text));
         }
         const conversation: Conversation = {
           id: randomUUID(), articleId: picked[0]!.id, agent,
           source: { title: `${picked.length} articles`, url: "", text: parts.join("\n\n"), capturedAt: new Date().toISOString() },
           messages: [],
         };
-        await this.dependencies.run(agent, conversation, question, this.runnerDirectory, controller.signal, (event) => {
-          if (controller.signal.aborted || !this.digest) return;
-          if (event.type === "delta") this.digest.text = event.text;
-          else this.digest.detail = event.reason;
-          this.changed();
-        }, this.store.state.language);
+        await this.dependencies.run(agent, conversation, question, this.runnerDirectory, controller.signal, emit, this.store.state.language, agent === "apple" ? "pcc" : undefined);
         if (!controller.signal.aborted && this.digest) this.digest.status = "completed";
       } catch (error) {
         if (this.digest) {
@@ -687,10 +715,11 @@ export class Engine {
         await this.dependencies.run(agent, previous, text, this.runnerDirectory, controller.signal, (event) => {
           if (controller.signal.aborted) return;
           if (event.type === "delta") { message.text = event.text; message.state = { status: "running" }; }
+          else if (event.type === "notice") message.notice = [...new Set([...(message.notice?.split("\n") ?? []), event.text])].join("\n");
           else message.state = { status: "waiting", reason: event.reason };
           notify();
           checkpoint();
-        }, this.store.state.language);
+        }, this.store.state.language, this.store.state.appleModel);
         if (!controller.signal.aborted) message.state = { status: "completed" };
       } catch (error) {
         message.state = controller.signal.aborted ? { status: "cancelled" }

@@ -3,6 +3,8 @@ import { z } from "zod";
 export const agentSchema = z.enum(["claude", "codex", "antigravity", "apple"]);
 export type Agent = z.infer<typeof agentSchema>;
 export const codexModel = "gpt-6-luna";
+export const appleModelSchema = z.enum(["system", "pcc"]);
+export type AppleModel = z.infer<typeof appleModelSchema>;
 
 export const folderSchema = z.object({ id: z.string(), name: z.string() });
 export const feedSchema = z.object({
@@ -57,6 +59,7 @@ export const messageSchema = z.discriminatedUnion("role", [
     id: z.string(), role: z.literal("assistant"), text: z.string(), createdAt: z.string(),
     state: runStateSchema,
     model: z.string().optional(),
+    notice: z.string().optional(),
     purpose: z.enum(["chat", "summary"]).optional(),
     sourceOrigin: z.enum(["feed", "web"]).optional(),
     partial: z.boolean().optional(),
@@ -93,6 +96,7 @@ export const stateSchema = z.object({
   fontSize: z.enum(["s", "m", "l"]).default("m"),
   defaultAgent: agentSchema.optional(),
   articlesRetentionDays: z.number().int().min(0).max(3650).default(0),
+  appleModel: appleModelSchema.default("system"),
 });
 export type ReaderState = z.infer<typeof stateSchema>;
 
@@ -151,6 +155,7 @@ export const organizeJobSchema = z.object({
   status: z.enum(["running", "completed", "failed"]),
   startedAt: z.string(),
   detail: z.string().optional(),
+  notice: z.string().optional(),
   plan: z.object({
     moves: z.array(z.object({ feedId: z.string(), title: z.string(), folderName: z.string(), newFolder: z.boolean() })),
     assignments: z.array(z.object({ url: z.string(), title: z.string(), folderName: z.string() })),
@@ -167,6 +172,7 @@ export const digestSchema = z.object({
   text: z.string(),
   titles: z.array(z.string()),
   detail: z.string().optional(),
+  notice: z.string().optional(),
 });
 export type DigestJob = z.infer<typeof digestSchema>;
 
@@ -236,6 +242,7 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("app.setFontSize"), size: z.enum(["s", "m", "l"]) }),
   z.object({ type: z.literal("app.setDefaultAgent"), agent: agentSchema }),
   z.object({ type: z.literal("app.setArticlesRetention"), days: z.number().int().min(0).max(3650) }),
+  z.object({ type: z.literal("app.setAppleModel"), model: appleModelSchema }),
   z.object({ type: z.literal("digest.run"), articleIds: z.array(z.string()).min(2).max(20), agent: agentSchema }),
   z.object({ type: z.literal("digest.cancel") }),
   z.object({ type: z.literal("digest.clear") }),
