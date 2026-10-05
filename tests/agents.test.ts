@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agentError, antigravityUnavailable, connection, readerPrompt, runCodex, runReader } from "../src/main/agents/reader";
+import { agentError, antigravityUnavailable, condenseText, connection, readerPrompt, runCodex, runReader } from "../src/main/agents/reader";
 import type { AgentEvent } from "../src/main/agents/reader";
 import { codexArguments, RpcClient } from "../src/main/agents/process";
 import type { Conversation } from "../src/shared/schema";
@@ -293,6 +293,42 @@ describe("apple fm tiers", () => {
       const delta = events.findLast((event) => event.type === "delta");
       expect(delta).toMatchObject({ type: "delta", text: "on-device answer" });
       expect(events).toContainEqual({ type: "notice", text: "Apple's cloud tier could not answer, so this answer was generated on-device." });
+    } finally { restore(); }
+  });
+
+  test("reader forwards condensation fallback notices without leaking chunk output", async () => {
+    const restore = await fakeFm("fm-condense-fallback", `#!/bin/sh
+if [ "$2" = "--model" ]; then
+  case "$4" in
+    *Excerpt*) if [ "\${#4}" -gt 30000 ]; then printf 'Condensed cloud excerpt'; else exit 1; fi ;;
+    *) printf 'Cloud answer' ;;
+  esac
+else
+  printf 'Condensed excerpt'
+fi
+`);
+    try {
+      const { events, emit } = collect();
+      const big = { ...conversation, source: { ...conversation.source, text: "a".repeat(110_000) } };
+      await runReader("apple", big, "Summarize", directory, new AbortController().signal, emit);
+      expect(events.filter((event) => event.type === "delta")).toEqual([{ type: "delta", text: "Cloud answer" }]);
+      expect(events).toContainEqual({
+        type: "notice",
+        text: "Article condensation: Apple's cloud tier could not answer, so this answer was generated on-device.",
+      });
+    } finally { restore(); }
+  });
+
+  test("digest condensation forwards cloud and fallback notices separately from its text", async () => {
+    const restore = await fakeFm("fm-digest-condense-fallback", "#!/bin/sh\nif [ \"$2\" = \"--model\" ]; then exit 1; fi\nprintf 'Condensed excerpt'\n");
+    try {
+      const { events, emit } = collect();
+      const text = await condenseText("apple", "a".repeat(20_000), 15_000, new AbortController().signal, directory, "ja", "pcc", emit);
+      expect(text).toBe("Condensed excerpt");
+      expect(events).toEqual([
+        { type: "notice", text: "記事の圧縮: この回答はAppleのクラウド（Private Cloud Compute）で生成されました。" },
+        { type: "notice", text: "記事の圧縮: Appleのクラウド層で応答できなかったため、この回答はオンデバイスで生成されました。" },
+      ]);
     } finally { restore(); }
   });
 

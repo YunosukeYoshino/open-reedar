@@ -767,6 +767,23 @@ describe("reading workflow", () => {
     expect(engine.snapshot.digest).toMatchObject({ status: "completed", notice: "cloud" });
     await engine.close();
   });
+  test("digest retains condensation notices after the final answer and deduplicates chunk notices", async () => {
+    const { engine, store, article } = await setup("digest-condense-notice", async (_agent, _conversation, _q, _cwd, _signal, emit) => {
+      emit({ type: "notice", text: "Cloud answer" });
+      emit({ type: "delta", text: "Digest" });
+    }, false, undefined, undefined, async (_agent, _text, _budget, _signal, _cwd, _lang, _model, emit) => {
+      emit?.({ type: "notice", text: "Condensed on-device" });
+      emit?.({ type: "notice", text: "Condensed on-device" });
+      return "Condensed body";
+    });
+    article.text = "a".repeat(20_000);
+    const second = { ...article, id: "digest-peer", title: "Peer" };
+    store.state.articles.push(second);
+    await engine.dispatch({ type: "digest.run", articleIds: [article.id, second.id], agent: "apple" });
+    await engine.settle();
+    expect(engine.snapshot.digest).toMatchObject({ status: "completed", text: "Digest", notice: "Condensed on-device\nCloud answer" });
+    await engine.close();
+  });
   test("digest keeps every selected article in the prompt when text is newline-heavy", async () => {
     let source = "";
     const models: string[] = [];
@@ -818,5 +835,21 @@ describe("reading workflow", () => {
     await engine.settle();
     expect(store.state.conversations[0]?.messages.at(-1)).toMatchObject({ notice: "cloud answer", text: "Answer", state: { status: "completed" } });
     await engine.close();
+  });
+  test("reader retains condensation notices alongside the final model notice on restart", async () => {
+    const { engine, article, path } = await setup("reader-condense-notice", async (_agent, _conversation, _q, _cwd, _signal, emit) => {
+      emit({ type: "notice", text: "Cloud answer" });
+      emit({ type: "notice", text: "Condensed on-device" });
+      emit({ type: "notice", text: "Condensed on-device" });
+      emit({ type: "delta", text: "Answer" });
+    });
+    await engine.dispatch({ type: "chat.send", articleId: article.id, agent: "apple", text: "Summarize" });
+    await engine.settle();
+    await engine.close();
+    const reopened = await Store.open(path);
+    expect(reopened.state.conversations[0]?.messages.at(-1)).toMatchObject({
+      notice: "Cloud answer\nCondensed on-device", text: "Answer", state: { status: "completed" },
+    });
+    reopened.close();
   });
 });

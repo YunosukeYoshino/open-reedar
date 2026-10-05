@@ -105,20 +105,26 @@ const promptLimit = 180_000;
 function promptCap(agent: Agent, model: AppleModel = "system") { return agent === "apple" ? model === "pcc" ? fmPccPromptLimit : fmPromptLimit : promptLimit; }
 
 // Runs the agent on a condensation chunk and returns its full text; chunk deltas are not answer output.
-function chunkRunner(agent: Agent, path: string, cwd: string, lang: Language, model: AppleModel = "system") {
+function chunkRunner(agent: Agent, path: string, cwd: string, lang: Language, model: AppleModel = "system", emit?: (event: AgentEvent) => void) {
   return async (prompt: string, signal: AbortSignal) => {
     let text = "";
-    const collect = (event: AgentEvent) => { if (event.type === "delta") text = event.text; };
-    if (agent === "apple") await runFm(path, prompt, cwd, signal, collect, lang, model);
+    const collect = (event: AgentEvent) => {
+      if (event.type === "delta") text = event.text;
+      else if (event.type === "notice") emit?.({ type: "notice", text: t(lang, "notice.condense", { detail: event.text }) });
+    };
+    if (agent === "apple") {
+      if (model === "pcc") collect({ type: "notice", text: t(lang, "notice.pcc") });
+      await runFm(path, prompt, cwd, signal, collect, lang, model);
+    }
     else if (agent === "claude") await runClaude(path, prompt, cwd, signal, collect, "condense", lang);
     else await runCodex(path, prompt, cwd, signal, collect, undefined, "condense", lang);
     return text;
   };
 }
 
-export async function condenseText(agent: Agent, text: string, budget: number, signal: AbortSignal, cwd: string, lang: Language = "en", appleModel: AppleModel = "system"): Promise<string> {
+export async function condenseText(agent: Agent, text: string, budget: number, signal: AbortSignal, cwd: string, lang: Language = "en", appleModel: AppleModel = "system", emit?: (event: AgentEvent) => void): Promise<string> {
   if (agent === "antigravity") throw new LocalizedError(t(lang, "err.antigravity"));
-  return condense(text, budget, promptCap(agent, appleModel), chunkRunner(agent, await executable(agent), cwd, lang, appleModel), signal, lang);
+  return condense(text, budget, promptCap(agent, appleModel), chunkRunner(agent, await executable(agent), cwd, lang, appleModel, emit), signal, lang);
 }
 
 export async function runReader(agent: Agent, conversation: Conversation, question: string, cwd: string, signal: AbortSignal, emit: (event: AgentEvent) => void, lang: Language = "en", appleModel: AppleModel = "system") {
@@ -136,7 +142,7 @@ export async function runReader(agent: Agent, conversation: Conversation, questi
     // non-text overhead by serializing with an empty source and re-shrink until it fits.
     const empty = header + JSON.stringify({ ...input, source: { ...input.source, text: "" } });
     const budget = Math.min(conversation.source.text.length - 1, cap - empty.length);
-    let text = await condense(conversation.source.text, budget, cap, chunkRunner(agent, path, cwd, lang, model), signal, lang);
+    let text = await condense(conversation.source.text, budget, cap, chunkRunner(agent, path, cwd, lang, model, emit), signal, lang);
     prompt = header + JSON.stringify({ ...input, source: { ...input.source, text } });
     while (prompt.length > cap && text.length > 0) {
       text = text.slice(0, text.length - (prompt.length - cap));

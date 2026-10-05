@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { Action, Agent, CliInstall, Connection, Conversation, DigestJob, LibraryExport, OpmlImport, OpmlPreview, OrganizeJob, Snapshot, Update } from "../shared/schema";
 import { agentSchema, codexModel, libraryExportSchema } from "../shared/schema";
 import { agentError, AuthenticationRequired, condenseText, connection, fmPccPromptLimit, LocalizedError, runOrganizer, runReader } from "./agents/reader";
+import type { AgentEvent } from "./agents/reader";
 import { loadArticleText, THIN_ARTICLE_TEXT_LENGTH } from "./article-text";
 import { cleanArticle, discoverFeeds, loadFeed } from "./feeds";
 import { parseOpml } from "./opml";
@@ -547,6 +548,13 @@ export class Engine {
     this.digestArticleIds = new Set(picked.map((article) => article.id));
     this.changed();
     const question = this.t("prompt.digest", { count: picked.length });
+    const emit = (event: AgentEvent) => {
+      if (controller.signal.aborted || !this.digest) return;
+      if (event.type === "delta") this.digest.text = event.text;
+      else if (event.type === "notice") this.digest.notice = [...new Set([...(this.digest.notice?.split("\n") ?? []), event.text])].join("\n");
+      else this.digest.detail = event.reason;
+      this.changed();
+    };
     const done = (async () => {
       try {
         const parts: string[] = [];
@@ -554,7 +562,7 @@ export class Engine {
           controller.signal.throwIfAborted();
           const raw = article.readerText ?? article.text;
           const text = raw.length > perArticle
-            ? await this.dependencies.condense(agent, raw, perArticle, controller.signal, this.runnerDirectory, this.store.state.language, agent === "apple" ? "pcc" : "system")
+            ? await this.dependencies.condense(agent, raw, perArticle, controller.signal, this.runnerDirectory, this.store.state.language, agent === "apple" ? "pcc" : "system", emit)
             : raw;
           parts.push(blockFor(article, text));
         }
@@ -563,13 +571,7 @@ export class Engine {
           source: { title: `${picked.length} articles`, url: "", text: parts.join("\n\n"), capturedAt: new Date().toISOString() },
           messages: [],
         };
-        await this.dependencies.run(agent, conversation, question, this.runnerDirectory, controller.signal, (event) => {
-          if (controller.signal.aborted || !this.digest) return;
-          if (event.type === "delta") this.digest.text = event.text;
-          else if (event.type === "notice") this.digest.notice = event.text;
-          else this.digest.detail = event.reason;
-          this.changed();
-        }, this.store.state.language, agent === "apple" ? "pcc" : undefined);
+        await this.dependencies.run(agent, conversation, question, this.runnerDirectory, controller.signal, emit, this.store.state.language, agent === "apple" ? "pcc" : undefined);
         if (!controller.signal.aborted && this.digest) this.digest.status = "completed";
       } catch (error) {
         if (this.digest) {
@@ -713,7 +715,7 @@ export class Engine {
         await this.dependencies.run(agent, previous, text, this.runnerDirectory, controller.signal, (event) => {
           if (controller.signal.aborted) return;
           if (event.type === "delta") { message.text = event.text; message.state = { status: "running" }; }
-          else if (event.type === "notice") message.notice = event.text;
+          else if (event.type === "notice") message.notice = [...new Set([...(message.notice?.split("\n") ?? []), event.text])].join("\n");
           else message.state = { status: "waiting", reason: event.reason };
           notify();
           checkpoint();
