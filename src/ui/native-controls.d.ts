@@ -6,4 +6,7 @@ declare module "react" {
     commandfor?: string;
     command?: "show-modal" | "close";
   }
+  interface InputHTMLAttributes<T> {
+    webkitdirectory?: string;
+  }
 }

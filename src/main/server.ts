@@ -44,20 +44,23 @@ export async function requestBody(request: AsyncIterable<unknown>, maximumBytes 
   return JSON.parse(await requestText(request, maximumBytes)) as unknown;
 }
 
-// Bulk-import actions carry whole files inside the action body. The "type" field leads the
-// payload, so the 33 MB budget applies only once the early bytes name a bulk action.
-const bulkActions = new Set(["library.import", "opml.import"]);
+// Bulk actions carry whole files inside the action body, each with its own budget. The
+// "type" field leads the payload, so the larger limit applies only once the early bytes
+// name a bulk action. plugins.install needs the most: 64 files of 1 MB each, base64-encoded.
+const bulkActionLimits = new Map([["library.import", 33 * 1024 * 1024], ["opml.import", 33 * 1024 * 1024], ["plugins.install", 96 * 1024 * 1024]]);
+const defaultBodyLimit = 1024 * 1024;
 async function actionBody(request: AsyncIterable<unknown>) {
   const chunks: Buffer[] = [];
   let length = 0;
-  let limit = 1024 * 1024;
+  let limit = defaultBodyLimit;
   for await (const chunk of request) {
     if (!Buffer.isBuffer(chunk)) throw new Error(t("en", "err.badInput"));
     chunks.push(chunk);
     length += chunk.length;
-    if (limit < 33 * 1024 * 1024 && length >= 4096) {
+    if (limit === defaultBodyLimit && length >= 4096) {
       const type = /"type"\s*:\s*"([^"]+)"/.exec(Buffer.concat(chunks).subarray(0, 4096).toString("utf8"))?.[1];
-      if (type !== undefined && bulkActions.has(type)) limit = 33 * 1024 * 1024;
+      const raised = type === undefined ? undefined : bulkActionLimits.get(type);
+      if (raised !== undefined) limit = raised;
     }
     if (length > limit) throw new Error(t("en", "err.inputTooLarge"));
   }

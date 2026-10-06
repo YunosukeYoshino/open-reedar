@@ -64,6 +64,9 @@ export function PluginPanel({ plugin, article, feeds, folders, act }: Props) {
         if (!canDispatch) { respond(id, { error: t("err.pluginPermission", { permission: "dispatch" }) }); return; }
         const parsed = actionSchema.safeParse(params);
         if (!parsed.success) { respond(id, { error: t("err.badInput") }); return; }
+        // The dispatch permission must not let a panel install or overwrite plugin code;
+        // plugins.install stays a user-only action.
+        if (parsed.data.type === "plugins.install") { respond(id, { error: t("err.pluginPermission", { permission: "plugins.install" }) }); return; }
         await forward(id, parsed.data);
         return;
       }

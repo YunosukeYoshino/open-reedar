@@ -275,6 +275,8 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("cli.install") }),
   z.object({ type: z.literal("plugins.refresh") }),
   z.object({ type: z.literal("plugin.invoke"), name: pluginNameSchema, articleId: z.string().min(1) }),
+  // Upload a plugin folder: { relpath: base64 } files written under plugins/<name>/.
+  z.object({ type: z.literal("plugins.install"), name: pluginNameSchema, files: z.array(z.object({ path: z.string().min(1).max(400), data: z.string().max(1_400_000) })).min(1).max(64) }),
   z.object({ type: z.literal("article.get"), id: z.string().min(1) }),
   z.object({ type: z.literal("chat.send"), articleId: z.string(), agent: agentSchema, text: z.string().trim().min(1).max(4000) }),
   z.object({ type: z.literal("chat.summarize"), articleId: z.string(), agent: agentSchema }),

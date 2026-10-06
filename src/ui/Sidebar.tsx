@@ -1,5 +1,5 @@
-import { ArrowDownUp, BookOpen, Bot, CheckCheck, ChevronDown, ChevronRight, Circle, Folder, FolderPlus, MoreHorizontal, Plus, Puzzle, RefreshCw, Rss, Search, Star, Undo2, X } from "lucide-react";
-import { useState } from "react";
+import { ArrowDownUp, BookOpen, Bot, CheckCheck, ChevronDown, ChevronRight, Circle, Folder, FolderPlus, Loader2, MoreHorizontal, Plus, Puzzle, RefreshCw, Rss, Search, Star, Undo2, X } from "lucide-react";
+import { useRef, useState } from "react";
 import type { Action, PluginInfo, ReaderState } from "../shared/schema";
 import { tone } from "./format";
 import { useT } from "./i18n";
@@ -12,12 +12,43 @@ type Props = {
   editFolder: (id: string | null) => void;
   searchAvailable: boolean; globalSearch: string; setGlobalSearch: (value: string) => void;
   plugins: PluginInfo[]; openPlugin: string | null; openPluginPanel: (name: string | null) => void;
+  act: (action: Action) => Promise<unknown>;
 };
 
-export function Sidebar({ state, scope, filter, refreshing, markReadUndo, select, perform, editFolder, searchAvailable, globalSearch, setGlobalSearch, plugins, openPlugin, openPluginPanel }: Props) {
+const installSkip = new Set([".git", ".DS_Store", "node_modules"]);
+const pluginNamePattern = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
+
+function readAsBase64(file: File) {
+  return new Promise<string>((resolvePromise, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolvePromise(String(reader.result).split(",", 2)[1] ?? "");
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+export function Sidebar({ state, scope, filter, refreshing, markReadUndo, select, perform, editFolder, searchAvailable, globalSearch, setGlobalSearch, plugins, openPlugin, openPluginPanel, act }: Props) {
   const t = useT();
   const panelPlugins = plugins.filter((plugin) => plugin.status === "ready" && plugin.manifest?.type === "panel" && plugin.manifest.placement === "sidebar");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const installInput = useRef<HTMLInputElement>(null);
+  const [installing, setInstalling] = useState(false);
+  const [installNotice, setInstallNotice] = useState<{ text: string; error: boolean } | null>(null);
+  async function installPlugin(list: FileList) {
+    const files = [...list].filter((file) => !file.webkitRelativePath.split("/").some((part) => installSkip.has(part)));
+    const root = files[0]?.webkitRelativePath.split("/")[0] ?? "";
+    setInstallNotice(null);
+    if (!pluginNamePattern.test(root)) { setInstallNotice({ text: t("err.pluginName"), error: true }); return; }
+    if (!files.length || files.length > 64 || files.some((file) => file.size > 1_048_576)) { setInstallNotice({ text: t("err.pluginFiles"), error: true }); return; }
+    setInstalling(true);
+    try {
+      const payload = await Promise.all(files.map(async (file) => ({ path: file.webkitRelativePath.slice(root.length + 1), data: await readAsBase64(file) })));
+      await act({ type: "plugins.install", name: root, files: payload });
+      setInstallNotice({ text: t("plugin.installed", { name: root }), error: false });
+    }
+    catch (error: unknown) { setInstallNotice({ text: error instanceof Error ? error.message : t("err.pluginInstall"), error: true }); }
+    finally { setInstalling(false); }
+  }
   const unread = state.articles.filter((article) => !article.read).length;
   const starred = state.articles.filter((article) => article.starred).length;
   const activeRuns = state.conversations.filter((conversation) => {
@@ -67,10 +98,10 @@ export function Sidebar({ state, scope, filter, refreshing, markReadUndo, select
       })}
       <div className="unfiled-feeds">{state.feeds.filter((feed) => feed.folderId === null).map(feedRow)}</div>
       {!state.feeds.length ? <button className="add-first-feed" commandfor="feed-dialog" command="show-modal"><Plus size={15} />{t("sidebar.addFirstFeed")}</button> : null}
-      {panelPlugins.length ? <>
-        <div className="section-heading"><span>{t("plugin.panels")}</span></div>
-        {panelPlugins.map((plugin) => <button key={plugin.name} className={`nav-row ${openPlugin === plugin.name ? "selected" : ""}`} onClick={() => openPluginPanel(openPlugin === plugin.name ? null : plugin.name)} aria-pressed={openPlugin === plugin.name}><Puzzle size={15} /><span className="nav-label">{plugin.manifest?.title ?? plugin.name}</span></button>)}
-      </> : null}
+      <div className="section-heading"><span>{t("plugin.panels")}</span><button className="icon-button" aria-label={t("plugin.install")} title={t("plugin.install")} disabled={installing} onClick={() => installInput.current?.click()}>{installing ? <Loader2 size={13} className="spin" /> : <Plus size={14} />}</button></div>
+      <input ref={installInput} type="file" webkitdirectory="" style={{ display: "none" }} tabIndex={-1} onChange={(event) => { const list = event.target.files; if (list?.length) void installPlugin(list); event.target.value = ""; }} />
+      {installNotice ? <p className={installNotice.error ? "form-error" : "run-notice"} role="status">{installNotice.text}</p> : null}
+      {panelPlugins.map((plugin) => <button key={plugin.name} className={`nav-row ${openPlugin === plugin.name ? "selected" : ""}`} onClick={() => openPluginPanel(openPlugin === plugin.name ? null : plugin.name)} aria-pressed={openPlugin === plugin.name}><Puzzle size={15} /><span className="nav-label">{plugin.manifest?.title ?? plugin.name}</span></button>)}
     </div>
     {markReadUndo ? <div className="undo-banner" role="status"><span>{t("sidebar.markedRead", { count: markReadUndo.count })}</span><button onClick={() => perform({ type: "articles.markReadUndo" })}><Undo2 size={12} />{t("sidebar.undo")}</button></div> : null}
     <div className="sidebar-bottom">
