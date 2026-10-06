@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
+import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pluginCsp, resolvePluginFile, scanPlugins } from "../src/main/plugins";
@@ -22,6 +23,10 @@ beforeAll(async () => {
   await mkdir(join(pluginsDirectory, "no-manifest"), { recursive: true });
   await mkdir(join(pluginsDirectory, "mismatch"), { recursive: true });
   await writeFile(join(pluginsDirectory, "mismatch", "plugin.toml"), 'name = "other"\ntype = "panel"\n');
+  await mkdir(join(pluginsDirectory, "no-entry"), { recursive: true });
+  await writeFile(join(pluginsDirectory, "no-entry", "plugin.toml"), 'name = "no-entry"\ntype = "panel"\n');
+  await writeFile(join(directory, "secret.txt"), "SECRET CANARY");
+  await symlink(join(directory, "secret.txt"), join(pluginsDirectory, "word-count", "leak"));
   await writeFile(join(pluginsDirectory, "stray.txt"), "not a plugin");
 });
 
@@ -63,6 +68,7 @@ describe("scanPlugins", () => {
     expect(byName.get("broken")).toMatchObject({ status: "error", manifest: null });
     expect(byName.get("no-manifest")).toMatchObject({ status: "error", manifest: null });
     expect(byName.get("mismatch")?.error).toContain("does not match");
+    expect(byName.get("no-entry")?.error).toContain("missing");
     expect(byName.has("stray.txt")).toBe(false);
     expect(plugins[0]?.name).toBe("broken");
   });
@@ -73,7 +79,7 @@ describe("scanPlugins", () => {
 
 describe("resolvePluginFile", () => {
   test("resolves nested files inside the plugin directory", () => {
-    expect(resolvePluginFile(pluginsDirectory, "word-count", "sub/app.js")).toBe(join(pluginsDirectory, "word-count", "sub", "app.js"));
+    expect(resolvePluginFile(pluginsDirectory, "word-count", "sub/app.js")).toBe(realpathSync(join(pluginsDirectory, "word-count", "sub", "app.js")));
   });
   test("rejects traversal, absolute paths, and unsafe names", () => {
     expect(resolvePluginFile(pluginsDirectory, "word-count", "../private.txt")).toBeNull();
@@ -84,12 +90,15 @@ describe("resolvePluginFile", () => {
     expect(resolvePluginFile(pluginsDirectory, "has space", "index.html")).toBeNull();
     expect(resolvePluginFile(pluginsDirectory, "word-count", "")).toBeNull();
   });
+  test("rejects symlinks that escape the plugin directory", () => {
+    expect(resolvePluginFile(pluginsDirectory, "word-count", "leak")).toBeNull();
+  });
 });
 
 describe("pluginCsp", () => {
   test("locks down the panel and opens connect-src per declared host", () => {
     const manifest = pluginManifestSchema.parse({ name: "wc", type: "panel", permissions: ["articles.read", "net:api.example.com", "net:cdn.example.org", "net:api.example.com"] });
-    expect(pluginCsp(manifest)).toBe("default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' api.example.com cdn.example.org");
+    expect(pluginCsp(manifest)).toBe("sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' api.example.com cdn.example.org");
   });
   test("defaults to connect-src 'self' only", () => {
     expect(pluginCsp(pluginManifestSchema.parse({ name: "wc", type: "panel" }))).toContain("connect-src 'self'");

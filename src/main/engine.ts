@@ -51,7 +51,7 @@ export class Engine {
 
   private readonly dependencies: Dependencies;
 
-  constructor(readonly store: Store, private readonly runnerDirectory: string, dependencies: Partial<Dependencies> = {}, private readonly pluginsDirectory = join(dirname(runnerDirectory), "plugins")) {
+  constructor(readonly store: Store, private readonly runnerDirectory: string, dependencies: Partial<Dependencies> = {}, readonly pluginsDirectory = join(dirname(runnerDirectory), "plugins")) {
     this.dependencies = { ...defaults, ...dependencies };
   }
 

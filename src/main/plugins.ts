@@ -1,4 +1,5 @@
-import { readdir, readFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
+import { access, readdir, readFile } from "node:fs/promises";
 import { resolve, sep } from "node:path";
 import { parse } from "smol-toml";
 import { ZodError } from "zod";
@@ -24,20 +25,35 @@ async function loadPlugin(directory: string, name: string): Promise<PluginInfo> 
     return { name, manifest: null, status: "error", error: issue ? `${issue.path.join(".")}: ${issue.message}` : "invalid plugin.toml" };
   }
   if (manifest.name !== name) return { name, manifest: null, status: "error", error: `manifest name "${manifest.name}" does not match directory "${name}"` };
+  if (manifest.type === "panel") {
+    try { await access(resolve(directory, name, manifest.entry)); }
+    catch { return { name, manifest: null, status: "error", error: `entry file "${manifest.entry}" is missing` }; }
+  }
   return { name, manifest, status: "ready" };
 }
 
 export function resolvePluginFile(directory: string, name: string, relPath: string) {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(name)) return null;
   const root = resolve(directory, name);
-  const path = resolve(root, relPath);
-  if (!path.startsWith(root + sep)) return null;
-  return path;
+  const literal = resolve(root, relPath);
+  if (!literal.startsWith(root + sep)) return null;
+  // Realpath too: a symlink inside the plugin directory must not serve files outside it.
+  // Missing files keep the literal path so the caller's readFile surfaces a plain 404.
+  try {
+    const realRoot = realpathSync(root);
+    const path = realpathSync(literal);
+    if (!path.startsWith(realRoot + sep)) return null;
+    return path;
+  } catch {
+    return literal;
+  }
 }
 
 export function pluginCsp(manifest: PluginManifest) {
   const hosts = [...new Set(manifest.permissions.filter((permission) => permission.startsWith("net:")).map((permission) => permission.slice(4)))];
-  // script-src allows inline: panels are single-file static HTML and the frame is an
-  // opaque-origin sandbox, so connect-src (not script-src) is the exfiltration boundary.
-  return `default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'${hosts.map((host) => ` ${host}`).join("")}`;
+  // The CSP sandbox directive sandboxes the document itself: opened top-level it still gets an
+  // opaque origin, so a panel page can never ride the app's session into the action API.
+  // script-src allows inline because panels are single-file static HTML; connect-src is the real
+  // exfiltration boundary — only 'self' plus the declared net: hosts.
+  return `sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'${hosts.map((host) => ` ${host}`).join("")}`;
 }

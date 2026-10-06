@@ -153,7 +153,7 @@ export async function startServer(options: Options) {
       const file = decodeURIComponent(parts.slice(1).join("/"));
       const plugin = engine.plugins.find((item) => item.name === name && item.status === "ready");
       if (!plugin?.manifest || plugin.manifest.type !== "panel") return json(response, 404, { error: t(store.state.language, "err.pageMissing") });
-      const path = resolvePluginFile(join(options.dataDirectory, "plugins"), name, file || plugin.manifest.entry);
+      const path = resolvePluginFile(engine.pluginsDirectory, name, file || plugin.manifest.entry);
       if (!path) return json(response, 403, { error: t(store.state.language, "err.accessDenied") });
       try {
         const body = await readFile(path);
