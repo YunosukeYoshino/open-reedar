@@ -9,7 +9,7 @@ just a directory.
 Copy the plugin directory into Reedar's plugin directory, then rescan:
 
 - Packaged app: `~/Library/Application Support/Reedar/plugins/<name>/`
-- Development: `$REEDAR_DATA_DIR/plugins/<name>/`
+- Development: `$REEDAR_DATA_DIR/plugins/<name>/` (default `.data/dev/plugins/<name>/` when `REEDAR_DATA_DIR` is unset)
 
 Plugins load at startup and after the `plugins.refresh` action. Plugins with
 errors appear in the registry with `status: "error"` and never abort the
@@ -57,7 +57,10 @@ action plugins you trust with your user account.
 `/plugins/<name>/<file>`. They get an opaque origin: no Node APIs, no app
 DOM access, no `localStorage`, no cookies, and no filesystem paths.
 Everything a panel needs must either ship inside its own directory or come
-through the postMessage bridge. Per-plugin CSP additionally restricts what
+through the postMessage bridge. The served document also carries a CSP
+`sandbox allow-scripts` directive, so opening the same URL top-level keeps
+the panel in an opaque origin instead of gaining the app's session and API
+access. Per-plugin CSP additionally restricts what
 the document may load: scripts, styles, and images only from the plugin's
 own files (`'unsafe-inline'` for scripts and styles, so a single-file
 `index.html` works), and network access limited to the
