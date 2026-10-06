@@ -1,0 +1,6 @@
+name = "word-count"
+title = "Word Count"
+type = "panel"
+entry = "index.html"
+placement = "sidebar"
+permissions = ["articles.read"]

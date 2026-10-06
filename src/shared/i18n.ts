@@ -120,7 +120,10 @@ const en = {
   // Plugins
   "plugin.sendTo": "Send to",
   "plugin.sent": "{name} finished.",
+  "plugin.panels": "Plugins",
   "err.pluginMissing": "Plugin is not available.",
+  "err.pluginMethod": "Unknown plugin bridge method.",
+  "err.pluginPermission": "The plugin does not have the \"{permission}\" permission.",
   "err.pluginStart": "Could not start the plugin \"{name}\".",
   "err.pluginExit": "The plugin \"{name}\" exited with code {status}.",
   "err.pluginTimeout": "The plugin \"{name}\" timed out.",
@@ -628,7 +631,10 @@ const ja: Record<MessageKey, string> = {
   // Plugins
   "plugin.sendTo": "送る",
   "plugin.sent": "{name} が完了しました。",
+  "plugin.panels": "プラグイン",
   "err.pluginMissing": "プラグインが利用できません。",
+  "err.pluginMethod": "不明なプラグインブリッジメソッドです。",
+  "err.pluginPermission": "プラグインに「{permission}」権限がありません。",
   "err.pluginStart": "プラグイン「{name}」を起動できませんでした。",
   "err.pluginExit": "プラグイン「{name}」がコード{status}で終了しました。",
   "err.pluginTimeout": "プラグイン「{name}」がタイムアウトしました。",

@@ -208,6 +208,12 @@ export const pluginInfoSchema = z.object({
   error: z.string().optional(),
 });
 export type PluginInfo = z.infer<typeof pluginInfoSchema>;
+// postMessage envelope a panel plugin sends the host window over the bridge.
+export const pluginBridgeRequestSchema = z.object({
+  id: z.union([z.string(), z.number()]),
+  method: z.string().min(1).max(40),
+  params: z.unknown().optional(),
+});
 
 export const snapshotSchema = z.object({
   state: stateSchema,
@@ -269,6 +275,7 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("cli.install") }),
   z.object({ type: z.literal("plugins.refresh") }),
   z.object({ type: z.literal("plugin.invoke"), name: pluginNameSchema, articleId: z.string().min(1) }),
+  z.object({ type: z.literal("article.get"), id: z.string().min(1) }),
   z.object({ type: z.literal("chat.send"), articleId: z.string(), agent: agentSchema, text: z.string().trim().min(1).max(4000) }),
   z.object({ type: z.literal("chat.summarize"), articleId: z.string(), agent: agentSchema }),
   z.object({ type: z.literal("chat.stop"), conversationId: z.string() }),
