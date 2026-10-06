@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Word Count</title>
+<style>
+  body { margin: 0; padding: 24px; font: 14px/1.6 -apple-system, BlinkMacSystemFont, sans-serif; color: #2b2422; }
+  h1 { font-size: 17px; margin: 0 0 6px; }
+  .stats { display: flex; gap: 24px; margin-top: 18px; }
+  .stats strong { display: block; font-size: 26px; }
+  .stats span { color: #7e7987; font-size: 11px; }
+  .empty { color: #7e7987; }
+</style>
+</head>
+<body>
+<h1 id="title">Word Count</h1>
+<p id="stats" class="empty">Select an article in Reedar.</p>
+<script>
+let seq = 0;
+const pending = new Map();
+let state = null;
+
+function call(method, params) {
+  return new Promise((resolve) => {
+    const id = ++seq;
+    pending.set(id, resolve);
+    parent.postMessage({ id, method, params }, "*");
+  });
+}
+
+async function render() {
+  const title = document.getElementById("title");
+  const stats = document.getElementById("stats");
+  const article = state && state.article;
+  if (!article) {
+    title.textContent = "Word Count";
+    stats.className = "empty";
+    stats.textContent = "Select an article in Reedar.";
+    return;
+  }
+  const answer = await call("getArticle", { id: article.id });
+  const full = answer && answer.result;
+  if (!full) {
+    stats.className = "empty";
+    stats.textContent = "Could not load the article.";
+    return;
+  }
+  const words = (full.text || "").trim().split(/\s+/).filter(Boolean).length;
+  const minutes = Math.max(1, Math.round(words / 200));
+  title.textContent = full.title;
+  stats.className = "stats";
+  stats.innerHTML = "";
+  for (const [value, label] of [[words.toLocaleString(), "words"], [minutes, "min read"]]) {
+    const item = document.createElement("div");
+    const strong = document.createElement("strong");
+    strong.textContent = value;
+    const span = document.createElement("span");
+    span.textContent = label;
+    item.append(strong, span);
+    stats.append(item);
+  }
+}
+
+window.addEventListener("message", (event) => {
+  const message = event.data;
+  if (!message || typeof message !== "object") return;
+  if (message.type === "init") { state = message.state; render(); return; }
+  const resolve = pending.get(message.id);
+  if (resolve) { pending.delete(message.id); resolve(message); }
+});
+
+call("ready");
+</script>
+</body>
+</html>

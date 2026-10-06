@@ -317,6 +317,7 @@ test("reader view toggles both ways and a tall next cue stays mounted at the art
   delete article.readerText;
 });
 
+
 test("a send result that lands after switching articles is not shown", async () => {
   const manifest = pluginManifestSchema.parse({ name: "saver", title: "Save", type: "action", command: ["./save.sh"] });
   snapshot.plugins = [{ name: "saver", manifest, status: "ready" }];
@@ -343,5 +344,81 @@ test("a send result that lands after switching articles is not shown", async () 
     globalThis.fetch = realFetch;
     snapshot.plugins = [];
     await act(async () => stream?.onmessage?.({ data: JSON.stringify({ type: "snapshot", snapshot }) }));
+    const back = window.document.querySelector('[aria-label="Unread: First article"], [aria-label="First article"]');
+    if (back instanceof window.HTMLButtonElement) await act(async () => back.click());
   }
+});
+
+
+function bridgeEvent(data: unknown, source: unknown) {
+  const event = new window.MessageEvent("message", { data });
+  Object.defineProperty(event, "source", { value: source, configurable: true });
+  return event;
+}
+
+async function openPanelPlugin(manifest: ReturnType<typeof pluginManifestSchema.parse>, rowText: string) {
+  snapshot.plugins = [{ name: manifest.name, manifest, status: "ready" }];
+  await act(async () => stream?.onmessage?.({ data: JSON.stringify({ type: "snapshot", snapshot }) }));
+  const row = [...window.document.querySelectorAll(".sidebar .nav-row")].find((el) => el.textContent?.includes(rowText));
+  if (!(row instanceof window.HTMLButtonElement)) throw new Error(`Missing plugin row ${rowText}`);
+  await act(async () => row.click());
+  const iframe = window.document.querySelector("iframe.plugin-frame");
+  if (!(iframe instanceof window.HTMLIFrameElement) || !iframe.contentWindow) throw new Error("Missing plugin iframe");
+  const posted: { id?: unknown; result?: unknown; error?: unknown; type?: string; state?: { article?: { title?: string } | null; feeds?: unknown[]; folders?: unknown[] } }[] = [];
+  iframe.contentWindow.postMessage = ((message: unknown) => { posted.push(message as (typeof posted)[number]); }) as typeof iframe.contentWindow.postMessage;
+  const send = async (data: unknown, source: unknown = iframe.contentWindow) => { await act(async () => { window.dispatchEvent(bridgeEvent(data, source)); }); };
+  return { iframe, posted, send };
+}
+
+test("a sidebar panel plugin renders sandboxed and answers bridge calls", async () => {
+  const manifest = pluginManifestSchema.parse({ name: "word-count", title: "Word Count", type: "panel", permissions: ["articles.read", "dispatch"] });
+  const { iframe, posted, send } = await openPanelPlugin(manifest, "Word Count");
+  expect(iframe.getAttribute("sandbox")).toBe("allow-scripts");
+  expect(iframe.getAttribute("src")).toBe("/plugins/word-count/index.html");
+
+  await send({ id: 1, method: "ready" });
+  const init = posted.find((message) => message.type === "init");
+  expect(init?.state?.article?.title).toBe("First article");
+  expect(init?.state?.feeds).toHaveLength(1);
+  expect(posted.find((message) => message.id === 1)).toHaveProperty("result", null);
+
+  await send({ id: 2, method: "getState" });
+  expect((posted.find((message) => message.id === 2)?.result as { article?: { title?: string } })?.article?.title).toBe("First article");
+
+  await send({ id: 3, method: "wat" });
+  expect(posted.find((message) => message.id === 3)?.error).toBeTruthy();
+
+  await send({ id: 4 });
+  expect(posted.find((message) => message.id === 4)).toBeUndefined();
+
+  const before = actions.length;
+  await send({ id: 5, method: "dispatch", params: { type: "article.star", id: snapshot.state.articles[0]?.id, starred: true } });
+  expect(actions.slice(before).at(-1)).toMatchObject({ type: "article.star" });
+  expect(posted.find((message) => message.id === 5)).toHaveProperty("result", null);
+
+  posted.length = 0;
+  await send({ id: 6, method: "getState" }, window);
+  expect(posted.find((message) => message.id === 6)).toBeUndefined();
+});
+
+test("bridge calls without the required permission get errors and empty init state", async () => {
+  const manifest = pluginManifestSchema.parse({ name: "limited", type: "panel" });
+  const { posted, send } = await openPanelPlugin(manifest, "limited");
+
+  await send({ id: 1, method: "ready" });
+  expect(posted.find((message) => message.type === "init")?.state?.article).toBeNull();
+
+  await send({ id: 2, method: "getState" });
+  expect(String(posted.find((message) => message.id === 2)?.error)).toContain("articles.read");
+
+  const before = actions.length;
+  await send({ id: 3, method: "dispatch", params: { type: "articles.markReadUndo" } });
+  expect(String(posted.find((message) => message.id === 3)?.error)).toContain("dispatch");
+  expect(actions).toHaveLength(before);
+
+  await send({ id: 4, method: "getArticle", params: { id: snapshot.state.articles[0]?.id } });
+  expect(String(posted.find((message) => message.id === 4)?.error)).toContain("articles.read");
+
+  snapshot.plugins = [];
+  await act(async () => stream?.onmessage?.({ data: JSON.stringify({ type: "snapshot", snapshot }) }));
 });

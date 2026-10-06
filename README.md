@@ -153,6 +153,15 @@ Reading sessions treat article content as untrusted input, restrict external too
 
 See [Security](SECURITY.md) for the boundaries and their limitations.
 
+## Plugins
+
+Reedar loads plugins from `plugins/<name>/` inside the data directory. Each plugin is a `plugin.toml` manifest plus its own files — no build step and no registry.
+
+- **Action plugins** are trusted local executables (like git external commands) that receive the selected article as JSON on stdin. Run them from the reader's "Send to" toolbar menu.
+- **Panel plugins** render in sandboxed iframes with an opaque origin — no Node, no app DOM, no storage — and talk to the app over a permission-gated `postMessage` bridge. Sidebar panels live in the sidebar's Plugins section; `placement = "article"` panels render under the article.
+
+Rescan with `plugins.refresh` after installing or editing a plugin. Manifest reference, trust model, bridge protocol, and examples live in [docs/plugins.md](docs/plugins.md); ready-to-copy plugins live in [examples/plugins/](examples/plugins/).
+
 ## Development
 
 ```sh
