@@ -349,7 +349,6 @@ test("a send result that lands after switching articles is not shown", async () 
   }
 });
 
-
 function bridgeEvent(data: unknown, source: unknown) {
   const event = new window.MessageEvent("message", { data });
   Object.defineProperty(event, "source", { value: source, configurable: true });
