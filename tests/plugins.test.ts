@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { realpathSync } from "node:fs";
-import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pluginCsp, resolvePluginFile, runActionPlugin, scanPlugins } from "../src/main/plugins";
@@ -121,6 +121,13 @@ describe("runActionPlugin", () => {
   });
   test("rejects when the executable cannot start", async () => {
     await expect(runActionPlugin(pluginsDirectory, action(["./definitely-missing-command"]), "", "en")).rejects.toThrow('Could not start the plugin "fixture"');
+  });
+  test("kills the whole process group when a background child outlives the plugin", async () => {
+    const pidFile = join(directory, "sleeper.pid");
+    await expect(runActionPlugin(pluginsDirectory, action(["sh", "-c", `sleep 60 & echo $! > ${pidFile}; exit 0`]), "", "en", 150)).rejects.toThrow("timed out");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const pid = Number((await readFile(pidFile, "utf8")).trim());
+    expect(() => process.kill(pid, 0)).toThrow();
   });
 });
 

@@ -48,6 +48,7 @@ export class Engine {
   plugins: PluginInfo[] = [];
   private listeners = new Set<(update: Update) => void>();
   private jobs = new Map<string, { controller: AbortController; done: Promise<void> }>();
+  private pluginAbort = new AbortController();
 
   private readonly dependencies: Dependencies;
 
@@ -266,7 +267,7 @@ export class Engine {
     const plugin = this.plugins.find((item) => item.name === name && item.status === "ready");
     if (!plugin?.manifest || plugin.manifest.type !== "action") throw new Error(this.t("err.pluginMissing"));
     // Same JSON serialization as `open-reedar article --json`.
-    return await runActionPlugin(join(this.pluginsDirectory, name), plugin.manifest, JSON.stringify(this.store.article(articleId), null, 2), this.store.state.language);
+    return await runActionPlugin(join(this.pluginsDirectory, name), plugin.manifest, JSON.stringify(this.store.article(articleId), null, 2), this.store.state.language, 30_000, this.pluginAbort.signal);
   }
 
   private async fetchArticleText(id: string) {
@@ -776,6 +777,7 @@ export class Engine {
     this.importJob?.controller.abort();
     this.organizeRun?.controller.abort();
     this.digestJob?.controller.abort();
+    this.pluginAbort.abort();
     for (const job of this.jobs.values()) job.controller.abort();
     await this.libraryImport?.catch(() => {});
     await this.settle();

@@ -67,7 +67,7 @@ const invokeTimeout = 30_000;
 
 // Action plugins are trusted local executables like git external commands: they run with the
 // user's normal environment in their own directory, not the scrubbed agent sandbox environment.
-export async function runActionPlugin(directory: string, manifest: ActionManifest, input: string, lang: Language, timeout = invokeTimeout): Promise<{ status: number; stdout: string; stderr: string }> {
+export async function runActionPlugin(directory: string, manifest: ActionManifest, input: string, lang: Language, timeout = invokeTimeout, signal?: AbortSignal): Promise<{ status: number; stdout: string; stderr: string }> {
   const [file, ...args] = manifest.command;
   if (!file) throw new Error(t(lang, "err.pluginStart", { name: manifest.name }));
   const child = spawn(file, args, { cwd: directory, env: process.env, stdio: ["pipe", "pipe", "pipe"], detached: process.platform !== "win32" });
@@ -84,6 +84,7 @@ export async function runActionPlugin(directory: string, manifest: ActionManifes
     const fail = (error: Error) => { if (!settled) { settled = true; clearTimeout(timer); terminate(child); reject(error); } };
     const timer = setTimeout(() => fail(new Error(t(lang, "err.pluginTimeout", { name: manifest.name }))), timeout);
     timer.unref();
+    if (signal) { if (signal.aborted) fail(new Error(t(lang, "err.pluginAborted", { name: manifest.name }))); else signal.addEventListener("abort", () => fail(new Error(t(lang, "err.pluginAborted", { name: manifest.name }))), { once: true }); }
     child.once("error", () => fail(new Error(t(lang, "err.pluginStart", { name: manifest.name }))));
     child.once("close", (code) => {
       if (settled) return;

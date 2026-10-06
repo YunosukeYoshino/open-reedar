@@ -76,11 +76,12 @@ export function launch(path: string, args: string[], cwd: string) {
 
 export function terminate(child: ChildProcessWithoutNullStreams) {
   const kill = (signal: NodeJS.Signals) => {
-    if (child.exitCode !== null || child.signalCode !== null) return;
+    // Signal the whole group even when the leader already exited: background children
+    // may still hold the output pipes and keep running inside the detached group.
     try {
       if (process.platform !== "win32" && child.pid) process.kill(-child.pid, signal);
       else child.kill(signal);
-    } catch { /* It may have exited between the status check and the signal. */ }
+    } catch { /* The group is already gone. */ }
   };
   kill("SIGTERM");
   const timer = setTimeout(() => kill("SIGKILL"), 1500);
