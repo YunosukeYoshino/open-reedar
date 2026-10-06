@@ -38,14 +38,17 @@ async function render() {
     stats.textContent = "Select an article in Reedar.";
     return;
   }
-  const answer = await call("getArticle", { id: article.id });
+  const wanted = article.id;
+  const answer = await call("getArticle", { id: wanted });
+  // The selection may have changed while getArticle was in flight; drop the stale render.
+  if (!state || !state.article || state.article.id !== wanted) return;
   const full = answer && answer.result;
   if (!full) {
     stats.className = "empty";
     stats.textContent = "Could not load the article.";
     return;
   }
-  const words = (full.text || "").trim().split(/\s+/).filter(Boolean).length;
+  const words = (full.readerText || full.text || "").trim().split(/\s+/).filter(Boolean).length;
   const minutes = Math.max(1, Math.round(words / 200));
   title.textContent = full.title;
   stats.className = "stats";
