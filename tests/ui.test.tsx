@@ -4,6 +4,7 @@ import { act } from "react";
 import type { Root } from "react-dom/client";
 import { App } from "../src/ui/App";
 import { parseFeed } from "../src/main/feeds";
+import { pluginManifestSchema } from "../src/shared/schema";
 import type { Action, Snapshot } from "../src/shared/schema";
 
 const window = new Window();
@@ -314,4 +315,33 @@ test("reader view toggles both ways and a tall next cue stays mounted at the art
   expect(scroll.querySelector(".next-cue")).toBe(cue);
   delete article.readerHtml;
   delete article.readerText;
+});
+
+test("a send result that lands after switching articles is not shown", async () => {
+  const manifest = pluginManifestSchema.parse({ name: "saver", title: "Save", type: "action", command: ["./save.sh"] });
+  snapshot.plugins = [{ name: "saver", manifest, status: "ready" }];
+  await act(async () => stream?.onmessage?.({ data: JSON.stringify({ type: "snapshot", snapshot }) }));
+  const first = window.document.querySelector('[aria-label="Unread: First article"], [aria-label="First article"]');
+  if (!(first instanceof window.HTMLButtonElement)) throw new Error("Missing first article row");
+  await act(async () => first.click());
+  const item = window.document.querySelector(".send-to .send-to-item");
+  if (!(item instanceof window.HTMLButtonElement)) throw new Error("Missing send-to item");
+
+  const realFetch = globalThis.fetch;
+  let resolveFetch: ((response: Response) => void) | undefined;
+  globalThis.fetch = ((_url: unknown, init: RequestInit) => { actions.push(JSON.parse(String(init.body))); return new Promise((resolve) => { resolveFetch = resolve; }); }) as typeof fetch;
+  try {
+    await act(async () => item.click());
+    const second = window.document.querySelector('[aria-label="Unread: Second article"], [aria-label="Second article"]');
+    if (!(second instanceof window.HTMLButtonElement)) throw new Error("Missing second article row");
+    await act(async () => second.click());
+    resolveFetch?.(new Response('{"result":{"status":0,"stdout":"sent ok"}}'));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(window.document.querySelector(".article-body")?.textContent).not.toContain("sent ok");
+    expect(actions.find((action) => action.type === "plugin.invoke")).toMatchObject({ name: "saver" });
+  } finally {
+    globalThis.fetch = realFetch;
+    snapshot.plugins = [];
+    await act(async () => stream?.onmessage?.({ data: JSON.stringify({ type: "snapshot", snapshot }) }));
+  }
 });
