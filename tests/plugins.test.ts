@@ -3,8 +3,9 @@ import { realpathSync } from "node:fs";
 import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pluginCsp, resolvePluginFile, scanPlugins } from "../src/main/plugins";
+import { pluginCsp, resolvePluginFile, runActionPlugin, scanPlugins } from "../src/main/plugins";
 import { pluginManifestSchema } from "../src/shared/schema";
+import type { PluginManifest } from "../src/shared/schema";
 
 const directory = await mkdtemp(join(tmpdir(), "reedar-plugins-test-"));
 const pluginsDirectory = join(directory, "plugins");
@@ -92,6 +93,34 @@ describe("resolvePluginFile", () => {
   });
   test("rejects symlinks that escape the plugin directory", () => {
     expect(resolvePluginFile(pluginsDirectory, "word-count", "leak")).toBeNull();
+  });
+});
+
+function action(command: string[]): Extract<PluginManifest, { type: "action" }> {
+  return pluginManifestSchema.parse({ name: "fixture", type: "action", command }) as Extract<PluginManifest, { type: "action" }>;
+}
+
+describe("runActionPlugin", () => {
+  test("pipes stdin to the command and captures stdout, stderr and status", async () => {
+    const result = await runActionPlugin(pluginsDirectory, action(["sh", "-c", "cat; echo oops >&2"]), '{"id":"a1"}', "en");
+    expect(result).toMatchObject({ status: 0, stdout: '{"id":"a1"}', stderr: "oops\n" });
+  });
+  test("returns status and output on non-zero exit so the caller can surface stderr", async () => {
+    const result = await runActionPlugin(pluginsDirectory, action(["sh", "-c", "echo why >&2; exit 3"]), "", "en");
+    expect(result).toMatchObject({ status: 3, stderr: "why\n" });
+  });
+  test("kills the process when it runs past the timeout", async () => {
+    const started = Date.now();
+    await expect(runActionPlugin(pluginsDirectory, action(["sh", "-c", "sleep 5"]), "", "en", 100)).rejects.toThrow("timed out");
+    expect(Date.now() - started).toBeLessThan(3000);
+  });
+  test("caps stdout and stderr at 64KB", async () => {
+    const result = await runActionPlugin(pluginsDirectory, action(["sh", "-c", "head -c 200000 /dev/zero | tr '\\0' x; head -c 200000 /dev/zero | tr '\\0' y >&2"]), "", "en");
+    expect(result.stdout.length).toBe(64 * 1024);
+    expect(result.stderr.length).toBe(64 * 1024);
+  });
+  test("rejects when the executable cannot start", async () => {
+    await expect(runActionPlugin(pluginsDirectory, action(["./definitely-missing-command"]), "", "en")).rejects.toThrow('Could not start the plugin "fixture"');
   });
 });
 

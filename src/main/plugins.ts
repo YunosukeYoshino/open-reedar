@@ -1,10 +1,13 @@
+import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { access, readdir, readFile } from "node:fs/promises";
 import { resolve, sep } from "node:path";
 import { parse } from "smol-toml";
 import { ZodError } from "zod";
+import { t } from "../shared/i18n";
 import { pluginManifestSchema } from "../shared/schema";
-import type { PluginInfo, PluginManifest } from "../shared/schema";
+import type { Language, PluginInfo, PluginManifest } from "../shared/schema";
+import { terminate } from "./agents/process";
 
 export async function scanPlugins(directory: string): Promise<PluginInfo[]> {
   let entries;
@@ -56,4 +59,38 @@ export function pluginCsp(manifest: PluginManifest) {
   // script-src allows inline because panels are single-file static HTML; connect-src is the real
   // exfiltration boundary — only 'self' plus the declared net: hosts.
   return `sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'${hosts.map((host) => ` ${host}`).join("")}`;
+}
+
+type ActionManifest = Extract<PluginManifest, { type: "action" }>;
+const invokeOutputLimit = 64 * 1024;
+const invokeTimeout = 30_000;
+
+// Action plugins are trusted local executables like git external commands: they run with the
+// user's normal environment in their own directory, not the scrubbed agent sandbox environment.
+export async function runActionPlugin(directory: string, manifest: ActionManifest, input: string, lang: Language, timeout = invokeTimeout): Promise<{ status: number; stdout: string; stderr: string }> {
+  const [file, ...args] = manifest.command;
+  if (!file) throw new Error(t(lang, "err.pluginStart", { name: manifest.name }));
+  const child = spawn(file, args, { cwd: directory, env: process.env, stdio: ["pipe", "pipe", "pipe"], detached: process.platform !== "win32" });
+  child.stdin.on("error", () => { /* EPIPE when the child exits before reading stdin. */ });
+  child.stdin.end(input);
+  const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
+  let stdoutLength = 0;
+  let stderrLength = 0;
+  child.stdout.on("data", (chunk: Buffer) => { const keep = Math.max(0, invokeOutputLimit - stdoutLength); stdoutLength += chunk.length; if (keep) stdout.push(chunk.subarray(0, keep)); });
+  child.stderr.on("data", (chunk: Buffer) => { const keep = Math.max(0, invokeOutputLimit - stderrLength); stderrLength += chunk.length; if (keep) stderr.push(chunk.subarray(0, keep)); });
+  return await new Promise((resolve, reject) => {
+    let settled = false;
+    const fail = (error: Error) => { if (!settled) { settled = true; clearTimeout(timer); terminate(child); reject(error); } };
+    const timer = setTimeout(() => fail(new Error(t(lang, "err.pluginTimeout", { name: manifest.name }))), timeout);
+    timer.unref();
+    child.once("error", () => fail(new Error(t(lang, "err.pluginStart", { name: manifest.name }))));
+    child.once("close", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      // Every exit resolves: the caller surfaces stderr, which is where the failure reason lives.
+      resolve({ status: code ?? -1, stdout: Buffer.concat(stdout).toString("utf8"), stderr: Buffer.concat(stderr).toString("utf8") });
+    });
+  });
 }

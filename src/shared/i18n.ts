@@ -117,6 +117,14 @@ const en = {
   "reader.highlightAdd": "Save selected text as a highlight",
   "reader.highlightRemove": "Remove highlight",
 
+  // Plugins
+  "plugin.sendTo": "Send to",
+  "plugin.sent": "{name} finished.",
+  "err.pluginMissing": "Plugin is not available.",
+  "err.pluginStart": "Could not start the plugin \"{name}\".",
+  "err.pluginExit": "The plugin \"{name}\" exited with code {status}.",
+  "err.pluginTimeout": "The plugin \"{name}\" timed out.",
+
   // Digest dialog
   "digest.title": "Compare articles",
   "digest.description": "Pick 2–20 articles and an agent writes a comparative digest.",
@@ -615,6 +623,14 @@ const ja: Record<MessageKey, string> = {
   "reader.highlights": "ハイライト",
   "reader.highlightAdd": "選択したテキストをハイライトに追加",
   "reader.highlightRemove": "ハイライトを削除",
+
+  // Plugins
+  "plugin.sendTo": "送る",
+  "plugin.sent": "{name} が完了しました。",
+  "err.pluginMissing": "プラグインが利用できません。",
+  "err.pluginStart": "プラグイン「{name}」を起動できませんでした。",
+  "err.pluginExit": "プラグイン「{name}」がコード{status}で終了しました。",
+  "err.pluginTimeout": "プラグイン「{name}」がタイムアウトしました。",
 
   "digest.title": "記事を比較",
   "digest.description": "記事を2〜20件選ぶとエージェントが比較ダイジェストを作成します。",

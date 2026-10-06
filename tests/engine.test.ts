@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthenticationRequired } from "../src/main/agents/reader";
@@ -851,5 +851,32 @@ describe("reading workflow", () => {
       notice: "Cloud answer\nCondensed on-device", text: "Answer", state: { status: "completed" },
     });
     reopened.close();
+  });
+});
+
+describe("plugins", () => {
+  test("scans the plugins directory at startup and rescans on plugins.refresh", async () => {
+    const name = "plugin-scan";
+    const pluginDirectory = join(directory, name, "plugins", "echo");
+    await mkdir(pluginDirectory, { recursive: true });
+    await writeFile(join(pluginDirectory, "plugin.toml"), 'name = "echo"\ntype = "action"\ncommand = ["cat"]\n');
+    const { engine } = await setup(name, async () => {});
+    expect(engine.snapshot.plugins?.[0]).toMatchObject({ name: "echo", status: "ready", manifest: { type: "action" } });
+    await writeFile(join(pluginDirectory, "plugin.toml"), 'name = "echo"\ntype = "widget"\n');
+    await engine.dispatch({ type: "plugins.refresh" });
+    expect(engine.snapshot.plugins?.[0]).toMatchObject({ name: "echo", status: "error" });
+    await engine.close();
+  });
+  test("plugin.invoke pipes the article JSON through the action command", async () => {
+    const name = "plugin-invoke";
+    const pluginDirectory = join(directory, name, "plugins", "echo");
+    await mkdir(pluginDirectory, { recursive: true });
+    await writeFile(join(pluginDirectory, "plugin.toml"), 'name = "echo"\ntype = "action"\ncommand = ["sh", "-c", "cat"]\n');
+    const { engine, article } = await setup(name, async () => {});
+    const result = await engine.dispatch({ type: "plugin.invoke", name: "echo", articleId: article.id }) as { status: number; stdout: string };
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({ id: article.id, title: article.title });
+    await expect(engine.dispatch({ type: "plugin.invoke", name: "unknown", articleId: article.id })).rejects.toThrow();
+    await engine.close();
   });
 });
