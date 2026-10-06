@@ -15,6 +15,10 @@ beforeAll(async () => {
   await mkdir(assets);
   await writeFile(join(assets, "index.html"), "<!doctype html><title>Reedar test</title>");
   await writeFile(join(directory, "private.txt"), "PRIVATE CANARY");
+  const pluginDirectory = join(directory, "plugins", "word-count");
+  await mkdir(pluginDirectory, { recursive: true });
+  await writeFile(join(pluginDirectory, "plugin.toml"), 'name = "word-count"\ntype = "panel"\npermissions = ["articles.read", "net:api.example.com"]\n');
+  await writeFile(join(pluginDirectory, "index.html"), "<title>word-count plugin</title>");
   const store = await Store.open(join(directory, "state.json"));
   const engine = new Engine(store, join(directory, "runner"), {
     fetchArticleText: async () => { throw new Error("no fixture article"); },
@@ -98,6 +102,22 @@ describe("local reader boundary", () => {
   test("rejects malformed Unicode launch keys as unauthenticated", async () => {
     const response = await fetch(`${runtime.origin}/?key=${encodeURIComponent("é".repeat(64))}`);
     expect(response.status).toBe(401);
+  });
+  test("serves panel plugin files under a scoped CSP only inside the plugin directory", async () => {
+    expect(runtime.engine.snapshot.plugins?.[0]).toMatchObject({ name: "word-count", status: "ready" });
+    const page = await fetch(`${runtime.origin}/plugins/word-count/index.html`, { headers: { Cookie: cookie } });
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain("word-count plugin");
+    const policy = page.headers.get("content-security-policy") ?? "";
+    expect(policy).toContain("default-src 'none'");
+    expect(policy).toContain("script-src 'self'");
+    expect(policy).toContain("connect-src 'self' api.example.com");
+    const escape = await fetch(`${runtime.origin}/plugins/word-count/%2e%2e%2fprivate.txt`, { headers: { Cookie: cookie } });
+    expect(escape.status).toBe(403);
+    expect(await escape.text()).not.toContain("PRIVATE CANARY");
+    expect((await fetch(`${runtime.origin}/plugins/unknown/index.html`, { headers: { Cookie: cookie } })).status).toBe(404);
+    expect((await fetch(`${runtime.origin}/plugins/word-count/missing.js`, { headers: { Cookie: cookie } })).status).toBe(404);
+    expect((await fetch(`${runtime.origin}/plugins/word-count/index.html`)).status).toBe(401);
   });
   test("streams the current snapshot through authenticated SSE", async () => {
     const controller = new AbortController();

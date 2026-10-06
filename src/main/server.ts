@@ -8,6 +8,7 @@ import type { loadArticleText } from "./article-text";
 import { Engine } from "./engine";
 import { fetchPublic } from "./network";
 import { serializeOpml } from "./opml";
+import { pluginCsp, resolvePluginFile } from "./plugins";
 import { Store } from "./store";
 import { t } from "../shared/i18n";
 
@@ -143,6 +144,22 @@ export async function startServer(options: Options) {
       }
       response.writeHead(200, { "Content-Type": result.contentType, "Cache-Control": "private, max-age=3600" });
       response.end(result.body);
+      return;
+    }
+    // Panel plugin bundles are the only plugin files ever web-served: action plugin directories can hold credentials in scripts, so they stay unreachable.
+    if (request.method === "GET" && url.pathname.startsWith("/plugins/")) {
+      const parts = url.pathname.slice("/plugins/".length).split("/");
+      const name = decodeURIComponent(parts[0] ?? "");
+      const file = decodeURIComponent(parts.slice(1).join("/"));
+      const plugin = engine.plugins.find((item) => item.name === name && item.status === "ready");
+      if (!plugin?.manifest || plugin.manifest.type !== "panel") return json(response, 404, { error: t(store.state.language, "err.pageMissing") });
+      const path = resolvePluginFile(join(options.dataDirectory, "plugins"), name, file || plugin.manifest.entry);
+      if (!path) return json(response, 403, { error: t(store.state.language, "err.accessDenied") });
+      try {
+        const body = await readFile(path);
+        response.writeHead(200, { "Content-Type": contentTypes[extname(path)] ?? "application/octet-stream", "Content-Security-Policy": pluginCsp(plugin.manifest) });
+        response.end(body);
+      } catch { json(response, 404, { error: t(store.state.language, "err.pageMissing") }); }
       return;
     }
     if (request.method !== "GET") return json(response, 405, { error: t(store.state.language, "err.methodNotAllowed") });
