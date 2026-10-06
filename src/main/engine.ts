@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { z } from "zod";
-import type { Action, Agent, CliInstall, Connection, Conversation, DigestJob, LibraryExport, OpmlImport, OpmlPreview, OrganizeJob, Snapshot, Update } from "../shared/schema";
+import type { Action, Agent, CliInstall, Connection, Conversation, DigestJob, LibraryExport, OpmlImport, OpmlPreview, OrganizeJob, PluginInfo, Snapshot, Update } from "../shared/schema";
 import { agentSchema, codexModel, libraryExportSchema } from "../shared/schema";
 import { agentError, AuthenticationRequired, condenseText, connection, fmPccPromptLimit, LocalizedError, runOrganizer, runReader } from "./agents/reader";
 import type { AgentEvent } from "./agents/reader";
@@ -11,6 +12,7 @@ import { parseOpml } from "./opml";
 import { publicUrl } from "./network";
 import { Store } from "./store";
 import type { SearchMatch } from "./articles-db";
+import { scanPlugins } from "./plugins";
 import { installCli } from "./cli-install";
 import { defaultLanguage, t } from "../shared/i18n";
 import type { MessageKey } from "../shared/i18n";
@@ -43,18 +45,20 @@ export class Engine {
   private digestJob: { controller: AbortController; done: Promise<void> } | undefined;
   private digestArticleIds = new Set<string>();
   private searchResults: { query: string; results: SearchMatch[]; unavailable?: boolean } | null = null;
+  plugins: PluginInfo[] = [];
   private listeners = new Set<(update: Update) => void>();
   private jobs = new Map<string, { controller: AbortController; done: Promise<void> }>();
 
   private readonly dependencies: Dependencies;
 
-  constructor(readonly store: Store, private readonly runnerDirectory: string, dependencies: Partial<Dependencies> = {}) {
+  constructor(readonly store: Store, private readonly runnerDirectory: string, dependencies: Partial<Dependencies> = {}, readonly pluginsDirectory = join(dirname(runnerDirectory), "plugins")) {
     this.dependencies = { ...defaults, ...dependencies };
   }
 
   async initialize() {
     await mkdir(this.runnerDirectory, { recursive: true, mode: 0o700 });
     this.scheduleAutoRefresh();
+    this.plugins = await scanPlugins(this.pluginsDirectory);
     if (this.pruneOldArticles()) await this.store.save();
     await this.refreshConnections();
   }
@@ -76,7 +80,7 @@ export class Engine {
       .finally(() => { this.refreshJob = undefined; });
   }
 
-  get snapshot(): Snapshot { return { state: this.store.state, connections: this.connections, refreshing: this.refreshing, opmlImport: this.opmlImport, opmlPreview: this.opmlPreview, organize: this.organize, cliInstall: this.cliInstall, markReadUndo: this.markReadUndoIds.length ? { count: this.markReadUndoIds.length } : null, feedDiscovery: this.feedDiscovery, digest: this.digest, search: this.searchResults, searchAvailable: this.store.searchAvailable }; }
+  get snapshot(): Snapshot { return { state: this.store.state, connections: this.connections, refreshing: this.refreshing, opmlImport: this.opmlImport, opmlPreview: this.opmlPreview, organize: this.organize, cliInstall: this.cliInstall, markReadUndo: this.markReadUndoIds.length ? { count: this.markReadUndoIds.length } : null, feedDiscovery: this.feedDiscovery, digest: this.digest, search: this.searchResults, searchAvailable: this.store.searchAvailable, plugins: this.plugins }; }
 
   subscribe(listener: (update: Update) => void) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private emit(update: Update) { for (const listener of this.listeners) listener(update); }
@@ -238,6 +242,11 @@ export class Engine {
       }
       case "connections.refresh": return this.refreshConnections();
       case "cli.install": return this.installCli();
+      case "plugins.refresh": {
+        this.plugins = await scanPlugins(this.pluginsDirectory);
+        this.changed();
+        return;
+      }
       case "chat.send": return this.send(action.articleId, action.agent, action.text);
       case "chat.summarize": return this.send(action.articleId, action.agent, this.t("prompt.summarize"), "summary");
       case "chat.stop": return this.stop(action.conversationId);
