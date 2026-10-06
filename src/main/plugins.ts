@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
-import { realpathSync } from "node:fs";
+import { chmodSync, lstatSync, realpathSync } from "node:fs";
 import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, resolve, sep } from "node:path";
+import { dirname, isAbsolute, resolve, sep } from "node:path";
 import { parse } from "smol-toml";
 import { ZodError } from "zod";
 import { t } from "../shared/i18n";
@@ -70,8 +70,23 @@ export async function installPluginFiles(directory: string, name: string, files:
     // A planted symlink inside an existing plugin dir must not redirect the write outside it.
     const realParent = realpathSync(parent);
     if (unsafe || (realParent !== realRoot && !realParent.startsWith(realRoot + sep))) throw new Error(t(lang, "err.pluginPath", { path: file.path }));
+    // A symlink already sitting at the target would redirect the write outside the root too.
+    if (lstatSync(target, { throwIfNoEntry: false })?.isSymbolicLink()) throw new Error(t(lang, "err.pluginPath", { path: file.path }));
     await writeFile(target, Buffer.from(file.data, "base64"));
   }
+}
+
+// An uploaded folder arrives without executable bits, so a newly installed action plugin
+// could not start. Restore +x on just the entrypoint the validated manifest names — a
+// relative path inside the plugin directory — and nowhere else.
+export function chmodPluginCommand(directory: string, manifest: ActionManifest) {
+  const file = manifest.command[0];
+  if (!file || isAbsolute(file)) return;
+  const root = resolve(directory, manifest.name);
+  const target = resolve(root, file);
+  if (!target.startsWith(root + sep)) return;
+  try { chmodSync(target, 0o755); }
+  catch { /* No such entrypoint: the plugin's next invoke surfaces the spawn failure. */ }
 }
 
 export function pluginCsp(manifest: PluginManifest) {

@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { realpathSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { installPluginFiles, pluginCsp, resolvePluginFile, runActionPlugin, scanPlugins } from "../src/main/plugins";
+import { chmodPluginCommand, installPluginFiles, pluginCsp, resolvePluginFile, runActionPlugin, scanPlugins } from "../src/main/plugins";
 import { pluginManifestSchema } from "../src/shared/schema";
 import type { PluginManifest } from "../src/shared/schema";
 
@@ -170,5 +170,35 @@ describe("installPluginFiles", () => {
   test("rejects a write redirected outside the root by a planted symlink", async () => {
     await symlink(join(directory, "secret.txt"), join(installDirectory, "newp", "evil"));
     await expect(installPluginFiles(installDirectory, "newp", [{ path: "evil/owned", data: "eA==" }], "en")).rejects.toThrow();
+  });
+  test("rejects a write whose target file is itself a symlink", async () => {
+    await symlink(join(directory, "secret.txt"), join(installDirectory, "newp", "linked.txt"));
+    await expect(installPluginFiles(installDirectory, "newp", [{ path: "linked.txt", data: "eA==" }], "en")).rejects.toThrow();
+    expect(await readFile(join(directory, "secret.txt"), "utf8")).toBe("SECRET CANARY");
+  });
+});
+
+describe("chmodPluginCommand", () => {
+  const b64 = (text: string) => Buffer.from(text).toString("base64");
+  test("restores +x on the entrypoint an installed action manifest names", async () => {
+    await installPluginFiles(installDirectory, "act", [
+      { path: "plugin.toml", data: b64('name = "act"\ntype = "action"\ncommand = ["./save.sh"]\n') },
+      { path: "save.sh", data: b64("#!/bin/sh\n") },
+    ], "en");
+    const manifest = (await scanPlugins(installDirectory)).find((plugin) => plugin.name === "act")?.manifest;
+    if (manifest?.type !== "action") throw new Error("setup: manifest not scanned as action");
+    expect(statSync(join(installDirectory, "act", "save.sh")).mode & 0o111).toBe(0);
+    chmodPluginCommand(installDirectory, manifest);
+    expect(statSync(join(installDirectory, "act", "save.sh")).mode & 0o111).not.toBe(0);
+  });
+  test("does not chmod commands outside the plugin directory", async () => {
+    await writeFile(join(directory, "outside.sh"), "#!/bin/sh\n", { mode: 0o644 });
+    await installPluginFiles(installDirectory, "esc", [
+      { path: "plugin.toml", data: b64('name = "esc"\ntype = "action"\ncommand = ["../../outside.sh"]\n') },
+    ], "en");
+    const manifest = (await scanPlugins(installDirectory)).find((plugin) => plugin.name === "esc")?.manifest;
+    if (manifest?.type !== "action") throw new Error("setup: manifest not scanned as action");
+    chmodPluginCommand(installDirectory, manifest);
+    expect(statSync(join(directory, "outside.sh")).mode & 0o111).toBe(0);
   });
 });

@@ -160,7 +160,7 @@ Reedar loads plugins from `plugins/<name>/` inside the data directory. Each plug
 - **Action plugins** are trusted local executables (like git external commands) that receive the selected article as JSON on stdin. Run them from the reader's "Send to" toolbar menu.
 - **Panel plugins** render in sandboxed iframes with an opaque origin — no Node, no app DOM, no storage — and talk to the app over a permission-gated `postMessage` bridge. Sidebar panels live in the sidebar's Plugins section; `placement = "article"` panels render under the article.
 
-Rescan with `plugins.refresh` after installing or editing a plugin. Manifest reference, trust model, bridge protocol, and examples live in [docs/plugins.md](docs/plugins.md); ready-to-copy plugins live in [examples/plugins/](examples/plugins/).
+Install a plugin folder from the sidebar's Plugins section (`+` button) — or copy/`git clone` one into the plugin directory — then rescan with `plugins.refresh`. Manifest reference, trust model, bridge protocol, and examples live in [docs/plugins.md](docs/plugins.md); ready-to-copy plugins live in [examples/plugins/](examples/plugins/).
 
 ## Development
 

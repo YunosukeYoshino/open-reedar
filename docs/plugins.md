@@ -15,7 +15,9 @@ skipped; up to 64 files of 1 MB each.
 Installing only overwrites the files it uploads: files already in the plugin
 directory that the upload does not name (a `.env` with your credentials, for
 example) are kept. Reinstalling a newer version of the same folder is how you
-update a plugin.
+update a plugin. Uploads carry no file modes, so an installed action plugin's
+entrypoint — the first word of `command`, when it names a file inside the
+plugin directory — gets `+x` restored automatically.
 
 You can also copy or `git clone` the directory into Reedar's plugin directory
 yourself, then rescan:
