@@ -1,0 +1,4 @@
+name = "save-to-instapaper"
+title = "Save to Instapaper"
+type = "action"
+command = ["./save.sh"]

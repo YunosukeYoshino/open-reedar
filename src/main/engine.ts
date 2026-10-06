@@ -12,7 +12,7 @@ import { parseOpml } from "./opml";
 import { publicUrl } from "./network";
 import { Store } from "./store";
 import type { SearchMatch } from "./articles-db";
-import { scanPlugins } from "./plugins";
+import { runActionPlugin, scanPlugins } from "./plugins";
 import { installCli } from "./cli-install";
 import { defaultLanguage, t } from "../shared/i18n";
 import type { MessageKey } from "../shared/i18n";
@@ -247,6 +247,7 @@ export class Engine {
         this.changed();
         return;
       }
+      case "plugin.invoke": return this.invokePlugin(action.name, action.articleId);
       case "chat.send": return this.send(action.articleId, action.agent, action.text);
       case "chat.summarize": return this.send(action.articleId, action.agent, this.t("prompt.summarize"), "summary");
       case "chat.stop": return this.stop(action.conversationId);
@@ -259,6 +260,13 @@ export class Engine {
     }
     await this.store.save();
     this.changed();
+  }
+
+  private async invokePlugin(name: string, articleId: string) {
+    const plugin = this.plugins.find((item) => item.name === name && item.status === "ready");
+    if (!plugin?.manifest || plugin.manifest.type !== "action") throw new Error(this.t("err.pluginMissing"));
+    // Same JSON serialization as `open-reedar article --json`.
+    return await runActionPlugin(join(this.pluginsDirectory, name), plugin.manifest, JSON.stringify(this.store.article(articleId), null, 2), this.store.state.language);
   }
 
   private async fetchArticleText(id: string) {

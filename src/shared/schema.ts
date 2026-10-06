@@ -176,6 +176,7 @@ export const digestSchema = z.object({
 });
 export type DigestJob = z.infer<typeof digestSchema>;
 
+const pluginNameSchema = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/);
 const pluginPermissionSchema = z.union([
   z.literal("articles.read"),
   z.literal("dispatch"),
@@ -184,7 +185,7 @@ const pluginPermissionSchema = z.union([
 const pluginEntrySchema = z.string().min(1).max(300).refine((value) => /^[a-zA-Z0-9][a-zA-Z0-9._/-]*$/.test(value) && !value.split("/").includes(".."));
 export const pluginManifestSchema = z.discriminatedUnion("type", [
   z.object({
-    name: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/),
+    name: pluginNameSchema,
     title: z.string().min(1).max(120).optional(),
     type: z.literal("panel"),
     entry: pluginEntrySchema.default("index.html"),
@@ -192,7 +193,7 @@ export const pluginManifestSchema = z.discriminatedUnion("type", [
     permissions: z.array(pluginPermissionSchema).default([]),
   }),
   z.object({
-    name: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/),
+    name: pluginNameSchema,
     title: z.string().min(1).max(120).optional(),
     type: z.literal("action"),
     command: z.array(z.string().min(1).max(500)).min(1).max(8),
@@ -267,6 +268,7 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("organize.clear") }),
   z.object({ type: z.literal("cli.install") }),
   z.object({ type: z.literal("plugins.refresh") }),
+  z.object({ type: z.literal("plugin.invoke"), name: pluginNameSchema, articleId: z.string().min(1) }),
   z.object({ type: z.literal("chat.send"), articleId: z.string(), agent: agentSchema, text: z.string().trim().min(1).max(4000) }),
   z.object({ type: z.literal("chat.summarize"), articleId: z.string(), agent: agentSchema }),
   z.object({ type: z.literal("chat.stop"), conversationId: z.string() }),
