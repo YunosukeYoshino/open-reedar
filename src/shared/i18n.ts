@@ -124,6 +124,7 @@ const en = {
   "err.pluginStart": "Could not start the plugin \"{name}\".",
   "err.pluginExit": "The plugin \"{name}\" exited with code {status}.",
   "err.pluginTimeout": "The plugin \"{name}\" timed out.",
+  "err.pluginAborted": "The plugin \"{name}\" was stopped.",
 
   // Digest dialog
   "digest.title": "Compare articles",
@@ -631,6 +632,7 @@ const ja: Record<MessageKey, string> = {
   "err.pluginStart": "プラグイン「{name}」を起動できませんでした。",
   "err.pluginExit": "プラグイン「{name}」がコード{status}で終了しました。",
   "err.pluginTimeout": "プラグイン「{name}」がタイムアウトしました。",
+  "err.pluginAborted": "プラグイン「{name}」の実行を中止しました。",
 
   "digest.title": "記事を比較",
   "digest.description": "記事を2〜20件選ぶとエージェントが比較ダイジェストを作成します。",
