@@ -1,6 +1,6 @@
-import { ArrowDownUp, BookOpen, Bot, CheckCheck, ChevronDown, ChevronRight, Circle, Folder, FolderPlus, MoreHorizontal, Plus, RefreshCw, Rss, Search, Star, Undo2, X } from "lucide-react";
+import { ArrowDownUp, BookOpen, Bot, CheckCheck, ChevronDown, ChevronRight, Circle, Folder, FolderPlus, MoreHorizontal, Plus, Puzzle, RefreshCw, Rss, Search, Star, Undo2, X } from "lucide-react";
 import { useState } from "react";
-import type { Action, ReaderState } from "../shared/schema";
+import type { Action, PluginInfo, ReaderState } from "../shared/schema";
 import { tone } from "./format";
 import { useT } from "./i18n";
 
@@ -11,10 +11,12 @@ type Props = {
   select: (scope: Scope, filter?: Filter) => void; perform: (action: Action) => void;
   editFolder: (id: string | null) => void;
   searchAvailable: boolean; globalSearch: string; setGlobalSearch: (value: string) => void;
+  plugins: PluginInfo[]; openPlugin: string | null; openPluginPanel: (name: string | null) => void;
 };
 
-export function Sidebar({ state, scope, filter, refreshing, markReadUndo, select, perform, editFolder, searchAvailable, globalSearch, setGlobalSearch }: Props) {
+export function Sidebar({ state, scope, filter, refreshing, markReadUndo, select, perform, editFolder, searchAvailable, globalSearch, setGlobalSearch, plugins, openPlugin, openPluginPanel }: Props) {
   const t = useT();
+  const panelPlugins = plugins.filter((plugin) => plugin.status === "ready" && plugin.manifest?.type === "panel" && plugin.manifest.placement === "sidebar");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const unread = state.articles.filter((article) => !article.read).length;
   const starred = state.articles.filter((article) => article.starred).length;
@@ -65,6 +67,10 @@ export function Sidebar({ state, scope, filter, refreshing, markReadUndo, select
       })}
       <div className="unfiled-feeds">{state.feeds.filter((feed) => feed.folderId === null).map(feedRow)}</div>
       {!state.feeds.length ? <button className="add-first-feed" commandfor="feed-dialog" command="show-modal"><Plus size={15} />{t("sidebar.addFirstFeed")}</button> : null}
+      {panelPlugins.length ? <>
+        <div className="section-heading"><span>{t("plugin.panels")}</span></div>
+        {panelPlugins.map((plugin) => <button key={plugin.name} className={`nav-row ${openPlugin === plugin.name ? "selected" : ""}`} onClick={() => openPluginPanel(openPlugin === plugin.name ? null : plugin.name)} aria-pressed={openPlugin === plugin.name}><Puzzle size={15} /><span className="nav-label">{plugin.manifest?.title ?? plugin.name}</span></button>)}
+      </> : null}
     </div>
     {markReadUndo ? <div className="undo-banner" role="status"><span>{t("sidebar.markedRead", { count: markReadUndo.count })}</span><button onClick={() => perform({ type: "articles.markReadUndo" })}><Undo2 size={12} />{t("sidebar.undo")}</button></div> : null}
     <div className="sidebar-bottom">

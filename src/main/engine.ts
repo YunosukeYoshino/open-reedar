@@ -249,6 +249,7 @@ export class Engine {
         return;
       }
       case "plugin.invoke": return this.invokePlugin(action.name, action.articleId);
+      case "article.get": return this.store.article(action.id);
       case "chat.send": return this.send(action.articleId, action.agent, action.text);
       case "chat.summarize": return this.send(action.articleId, action.agent, this.t("prompt.summarize"), "summary");
       case "chat.stop": return this.stop(action.conversationId);

@@ -55,6 +55,13 @@ else {
       event.preventDefault();
       try { void shell.openExternal(publicUrl(url).href); } catch { /* Keep untrusted schemes out of the host. */ }
     });
+    // Plugin iframes may only navigate inside the app origin; a panel must never
+    // redirect itself to an external page where it could exfiltrate article data.
+    window.webContents.on("will-frame-navigate", (event) => {
+      if (event.isMainFrame || !runtime) return;
+      try { if (new URL(event.url).origin === runtime.origin) return; } catch { /* Non-URL navigation is also blocked. */ }
+      event.preventDefault();
+    });
     window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     updates = await createDesktopUpdates(window, async () => {
       await closeRuntime();
