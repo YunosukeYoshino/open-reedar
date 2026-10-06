@@ -12,7 +12,7 @@ import { parseOpml } from "./opml";
 import { publicUrl } from "./network";
 import { Store } from "./store";
 import type { SearchMatch } from "./articles-db";
-import { runActionPlugin, scanPlugins } from "./plugins";
+import { installPluginFiles, runActionPlugin, scanPlugins } from "./plugins";
 import { installCli } from "./cli-install";
 import { defaultLanguage, t } from "../shared/i18n";
 import type { MessageKey } from "../shared/i18n";
@@ -249,6 +249,12 @@ export class Engine {
         return;
       }
       case "plugin.invoke": return this.invokePlugin(action.name, action.articleId);
+      case "plugins.install": {
+        await installPluginFiles(this.pluginsDirectory, action.name, action.files, this.store.state.language);
+        this.plugins = await scanPlugins(this.pluginsDirectory);
+        this.changed();
+        return;
+      }
       case "article.get": return this.store.article(action.id);
       case "chat.send": return this.send(action.articleId, action.agent, action.text);
       case "chat.summarize": return this.send(action.articleId, action.agent, this.t("prompt.summarize"), "summary");

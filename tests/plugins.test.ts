@@ -3,7 +3,7 @@ import { realpathSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pluginCsp, resolvePluginFile, runActionPlugin, scanPlugins } from "../src/main/plugins";
+import { installPluginFiles, pluginCsp, resolvePluginFile, runActionPlugin, scanPlugins } from "../src/main/plugins";
 import { pluginManifestSchema } from "../src/shared/schema";
 import type { PluginManifest } from "../src/shared/schema";
 
@@ -138,5 +138,37 @@ describe("pluginCsp", () => {
   });
   test("defaults to connect-src 'self' only", () => {
     expect(pluginCsp(pluginManifestSchema.parse({ name: "wc", type: "panel" }))).toContain("connect-src 'self'");
+  });
+});
+
+const installDirectory = join(directory, "install-target");
+
+describe("installPluginFiles", () => {
+  const b64 = (text: string) => Buffer.from(text).toString("base64");
+  test("writes uploaded files and the rescan picks the plugin up", async () => {
+    await installPluginFiles(installDirectory, "newp", [
+      { path: "plugin.toml", data: b64('name = "newp"\ntype = "panel"\n') },
+      { path: "index.html", data: b64("<title>n</title>") },
+      { path: "assets/app.js", data: b64("x") },
+    ], "en");
+    expect(await readFile(join(installDirectory, "newp", "index.html"), "utf8")).toBe("<title>n</title>");
+    expect(await readFile(join(installDirectory, "newp", "assets", "app.js"), "utf8")).toBe("x");
+    expect((await scanPlugins(installDirectory))[0]).toMatchObject({ name: "newp", status: "ready" });
+  });
+  test("overwrites named files but keeps other files already on disk", async () => {
+    await installPluginFiles(installDirectory, "newp", [{ path: ".env", data: b64("TOKEN=secret") }], "en");
+    await installPluginFiles(installDirectory, "newp", [{ path: "index.html", data: b64("<title>v2</title>") }], "en");
+    expect(await readFile(join(installDirectory, "newp", "index.html"), "utf8")).toBe("<title>v2</title>");
+    expect(await readFile(join(installDirectory, "newp", ".env"), "utf8")).toBe("TOKEN=secret");
+  });
+  test("rejects unsafe names and paths that escape the plugin root", async () => {
+    await expect(installPluginFiles(installDirectory, "bad name", [{ path: "a", data: "eA==" }], "en")).rejects.toThrow();
+    await expect(installPluginFiles(installDirectory, "newp", [{ path: "../escape.txt", data: "eA==" }], "en")).rejects.toThrow();
+    await expect(installPluginFiles(installDirectory, "newp", [{ path: "sub/../../escape.txt", data: "eA==" }], "en")).rejects.toThrow();
+    await expect(installPluginFiles(installDirectory, "newp", [{ path: "/etc/passwd", data: "eA==" }], "en")).rejects.toThrow();
+  });
+  test("rejects a write redirected outside the root by a planted symlink", async () => {
+    await symlink(join(directory, "secret.txt"), join(installDirectory, "newp", "evil"));
+    await expect(installPluginFiles(installDirectory, "newp", [{ path: "evil/owned", data: "eA==" }], "en")).rejects.toThrow();
   });
 });

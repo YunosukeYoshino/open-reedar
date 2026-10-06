@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { access, readdir, readFile } from "node:fs/promises";
-import { resolve, sep } from "node:path";
+import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, resolve, sep } from "node:path";
 import { parse } from "smol-toml";
 import { ZodError } from "zod";
 import { t } from "../shared/i18n";
@@ -36,7 +36,7 @@ async function loadPlugin(directory: string, name: string): Promise<PluginInfo> 
 }
 
 export function resolvePluginFile(directory: string, name: string, relPath: string) {
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(name)) return null;
+  if (!pluginNamePattern.test(name)) return null;
   const root = resolve(directory, name);
   const literal = resolve(root, relPath);
   if (!literal.startsWith(root + sep)) return null;
@@ -49,6 +49,28 @@ export function resolvePluginFile(directory: string, name: string, relPath: stri
     return path;
   } catch {
     return literal;
+  }
+}
+
+const pluginNamePattern = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
+
+// Write an uploaded plugin folder under <directory>/<name>/. Files only ever overwrite
+// paths they name: files a previous install left behind (e.g. a local .env with the
+// user's credentials) are kept. Rejects anything that would write outside the root.
+export async function installPluginFiles(directory: string, name: string, files: { path: string; data: string }[], lang: Language) {
+  if (!pluginNamePattern.test(name)) throw new Error(t(lang, "err.pluginName"));
+  const root = resolve(directory, name);
+  await mkdir(root, { recursive: true });
+  const realRoot = realpathSync(root);
+  for (const file of files) {
+    const target = resolve(root, file.path);
+    const unsafe = !target.startsWith(root + sep);
+    const parent = dirname(target);
+    await mkdir(parent, { recursive: true });
+    // A planted symlink inside an existing plugin dir must not redirect the write outside it.
+    const realParent = realpathSync(parent);
+    if (unsafe || (realParent !== realRoot && !realParent.startsWith(realRoot + sep))) throw new Error(t(lang, "err.pluginPath", { path: file.path }));
+    await writeFile(target, Buffer.from(file.data, "base64"));
   }
 }
 

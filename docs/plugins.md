@@ -6,7 +6,19 @@ just a directory.
 
 ## Installing
 
-Copy the plugin directory into Reedar's plugin directory, then rescan:
+Pick the plugin's folder from the sidebar's Plugins section (`+` button) and
+Reedar copies it into its plugin directory, then rescans — this is the
+`plugins.install` action. The folder's name becomes the plugin name and must
+match `name` in `plugin.toml`. `.git`, `node_modules`, and `.DS_Store` are
+skipped; up to 64 files of 1 MB each.
+
+Installing only overwrites the files it uploads: files already in the plugin
+directory that the upload does not name (a `.env` with your credentials, for
+example) are kept. Reinstalling a newer version of the same folder is how you
+update a plugin.
+
+You can also copy or `git clone` the directory into Reedar's plugin directory
+yourself, then rescan:
 
 - Packaged app: `~/Library/Application Support/Reedar/plugins/<name>/`
 - Development: `$REEDAR_DATA_DIR/plugins/<name>/` (default `.data/dev/plugins/<name>/` when `REEDAR_DATA_DIR` is unset)
