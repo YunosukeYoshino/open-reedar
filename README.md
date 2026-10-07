@@ -200,6 +200,8 @@ Apple Intelligence uses the macOS 27 `fm` CLI. The connection dialog selects `sy
 
 Bug reports, focused fixes, and documentation improvements are welcome. Start with the [contribution guide](CONTRIBUTING.md), [design notes](docs/design-notes.md), and [validation record](docs/validation.md).
 
+Automation: PRs labeled `auto` are evaluated by the conveyor merge gate (`.conveyor/policy.json`) and squash-auto-merged when the gate verdict passes and CI is green.
+
 Reedar is an independent project inspired by Reeder's reading layout. It is not affiliated with Reeder or the connected AI providers.
 
 ## License
