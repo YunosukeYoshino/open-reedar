@@ -39,6 +39,7 @@ You do not need a model subscription to run the automated suite. Live AI checks 
 | `electron-builder.json`, `electron-builder.signed.cjs` | Preview packaging, update metadata, and the optional signed/notarized profile |
 | `.github/workflows/ci.yml` | Automatic pull-request and main-branch checks |
 | `.github/workflows/build-macos.yml` | Manually triggered preview artifact builds |
+| `.conveyor/` | Merge policy, eval contract, and gate for the `auto`-labeled auto-merge lane |
 | `tests/` | Protocol, storage, network, workflow, desktop, and UI tests |
 | `docs/` | Design context and validation evidence |
 
