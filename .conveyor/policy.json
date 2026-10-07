@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "allow": {
+    "labels": ["auto", "conveyor"],
+    "max_changed_files": 10,
+    "max_diff_lines": 400,
+    "paths": ["src/**", "tests/**", "docs/**", "examples/**", "*.md"]
+  },
+  "deny": {
+    "paths": [
+      "**/migrations/**",
+      "src/main/network.ts",
+      "src/main/agents/**",
+      "src/main/store.ts",
+      "package.json",
+      "bun.lock",
+      "tsconfig.json",
+      ".github/**",
+      ".conveyor/**",
+      "electron-builder*",
+      "scripts/**",
+      "assets/**"
+    ]
+  },
+  "require": {
+    "author_in": ["devin-ai-integration[bot]", "dependabot[bot]", "YunosukeYoshino"],
+    "ci_green": true
+  },
+  "verdict": "arm_auto_merge"
+}
