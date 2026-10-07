@@ -1,0 +1,29 @@
+# conveyor eval contract — the machine-checkable definition of "done".
+# The conductor and workers run these metrics; an issue is complete when
+# `check` exits 0 and no metric regresses past baseline.
+version: 1
+
+metrics:
+  - id: type_errors
+    cmd: "bunx tsc --noEmit 2>&1 || true"
+    extract: "count_matches(error TS)"
+    direction: lower_better
+    weight: 2
+
+  - id: test_failures
+    cmd: "bun test 2>&1 || true"
+    extract: "count_matches(\\(fail\\))"
+    direction: lower_better
+    weight: 3
+
+  - id: build_ok
+    cmd: "bun run build"
+    extract: "exit_code"
+    constraint: { eq: 0 }
+
+ratchet:
+  baseline: .conveyor/baseline.json
+  policy: no_regression # a metric may never land worse than baseline
+
+budget:
+  max_iterations: 3 # worker gives up and escalates after N fix attempts

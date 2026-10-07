@@ -1,0 +1,52 @@
+name: Conveyor gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: conveyor-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: gate
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.action != 'unlabeled' &&
+      contains(github.event.pull_request.labels.*.name, 'auto')
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Evaluate merge policy
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node .conveyor/gate.mjs
+      - name: Arm auto-merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          armed=$(gh pr view "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" \
+            --json autoMergeRequest --jq '.autoMergeRequest != null')
+          if [ "$armed" = "false" ]; then
+            gh pr merge "${{ github.event.pull_request.number }}" \
+              --repo "${{ github.repository }}" --auto --squash
+          fi
+
+  disarm:
+    name: disarm
+    runs-on: ubuntu-latest
+    if: github.event.action == 'unlabeled' && github.event.label.name == 'auto'
+    steps:
+      - name: Disable auto-merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          gh api graphql
+          -f query='mutation($id:ID!){disablePullRequestAutoMerge(input:{pullRequestId:$id}){pullRequest{id}}}'
+          -f id="${{ github.event.pull_request.node_id }}"
